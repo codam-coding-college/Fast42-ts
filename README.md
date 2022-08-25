@@ -17,6 +17,7 @@ Basic usage:
     'filter[campus_id]': campus_id.toString(),
   })
 ```
+Obviously your id/secret should come from the environment (.env file and `dotenv`) and not be committed to git.
 
 How I use it:
 ```ts
