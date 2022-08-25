@@ -1,8 +1,8 @@
 {
   "name": "fast42",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
-  "main": "src/api42.ts",
+  "main": "build/api42.js",
   "type": "module",
   "scripts": {
     "build": "tsc",
