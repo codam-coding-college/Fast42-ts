@@ -6,6 +6,9 @@ Fast 42 connector Use straight from github:
 Basic usage:
 
 ```ts
+
+import Api42 from "fast42"
+
 const api = await new Api42([
   {
     client_id: <YOUR API CLIENT ID>,
