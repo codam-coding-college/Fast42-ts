@@ -2,7 +2,6 @@ import Bottleneck from "bottleneck";
 import fetch, { Response } from 'node-fetch';
 import NodeCache from 'node-cache';
 
-
 interface AccessToken {
   access_token: string
   token_type: string
@@ -24,7 +23,7 @@ interface ApiSecret {
   client_secret: string,
 }
 
-export class api42 {
+class api42 {
   private _secrets: ApiSecret[]
   private _rootUrl: string
   private _limiters: Bottleneck[]

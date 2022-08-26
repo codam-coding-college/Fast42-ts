@@ -1,17 +1,21 @@
 {
   "name": "fast42",
-  "version": "1.0.1",
-  "description": "",
-  "main": "dist/index.js",
+  "version": "1.0.5",
+  "description": "Fast (server-side) connector with rate-limiter for 42 API.",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
   "types": "dist/index.d.ts",
-  "type": "module",
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc",
-    "install": "npm run build",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "tsc": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
+    "build": "npm run tsc",
+    "install": "npm run tsc",
+    "prepublishOnly": "npm run tsc"
   },
   "keywords": [],
-  "author": "",
+  "author": "Codam Coding College <it@codam.nl>",
   "license": "ISC",
   "devDependencies": {
     "typescript": "4.7.4",
