@@ -18,7 +18,7 @@ npm i @codam/fast42
 Basic usage:
 
 ```ts
-import Api42 from "fast42"
+import Api42 from "@codam/fast42"
 
 const api = await new Api42([
   {
@@ -38,7 +38,7 @@ Obviously your id/secret should come from the environment and not be committed t
 How I use it:
 
 ```ts
-import Api42, { Response } from "fast42"
+import Api42, { Response } from "@codam/fast42"
 import dotenv from "dotenv";
 
 // utility function for error handling and logging
