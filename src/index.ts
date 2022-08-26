@@ -37,6 +37,9 @@ class api42 {
    *
    * @param {ApiSecret[]} secrets Array of ApiSecret objects containing the client_id and client_secret
    *  make sure all keys have the same rate limit. Since the keys are rotated after every call, they are used equally.
+   * @param {number} concurrentOffset Offset from the maximum concurrent requests per second, to make sure the rate limit is not exceeded.
+   *  The default value is 0, which means that the maximum concurrent requests per second is used (but you might get more retries).
+   *  Recommended value is 1 if your key can do more than 2 req per second.
    */
   constructor(secrets: ApiSecret[], concurrentOffset: number = 0) {
     if (secrets.length === 0) {
