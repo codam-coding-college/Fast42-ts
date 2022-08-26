@@ -18,8 +18,12 @@ jobs:
         with:
           node-version: '16.x'
           registry-url: 'https://registry.npmjs.org'
+          always-auth: true
+        env:
+         NODE_AUTH_TOKEN: ${{ secrets.NPM_CODAMIT_AUTOMATION }}
       - run: npm ci
       - run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_CODAMIT_AUTOMATION }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_CODAMIT_AUTOMATION }}
