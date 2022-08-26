@@ -31,6 +31,8 @@ Obviously your id/secret should come from the environment (.env file and
 How I use it:
 
 ```ts
+import Api42, { Response } from "fast42"
+
 async function getAll42(
   api: Api42,
   url: string,
