@@ -1,7 +1,11 @@
 # fast42
 
-Fast 42 connector Use straight from github:
-`npm i --save https://github.com/codam-coding-college/fast42.git`
+Fast 42 connector
+
+### Install
+```sh
+npm i @codam/fast42
+```
 
 Basic usage:
 
