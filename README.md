@@ -47,7 +47,6 @@ async function getAll42(
     if (p.status === 429) {
       if (pagenr) {
         p = await api.getPage(url, pagenr, options);
-        å;
       } else {
         console.error(`Failed retry on unkown page for ${url}`);
       }
