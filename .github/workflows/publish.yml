@@ -1,10 +1,16 @@
 name: Publish Package to npmjs
 on:
-  release:
-    types: [created]
+  push:
+    branches:
+      - main
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      issues: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v3
       # Setup .npmrc file to publish to npm
@@ -13,6 +19,7 @@ jobs:
           node-version: '16.x'
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
-      - run: npm publish
+      - run: npx semantic-release
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_CODAMIT_AUTOMATION }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_CODAMIT_AUTOMATION }}
