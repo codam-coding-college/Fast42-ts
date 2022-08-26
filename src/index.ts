@@ -30,6 +30,7 @@ class api42 {
   private _cache: NodeCache
   private _keyCount: number
   private _currentIndex: number
+  private _concurrentOffset: number
 
   /**
    * Constructs the api42 class
@@ -37,7 +38,7 @@ class api42 {
    * @param {ApiSecret[]} secrets Array of ApiSecret objects containing the client_id and client_secret
    *  make sure all keys have the same rate limit. Since the keys are rotated after every call, they are used equally.
    */
-  constructor(secrets: ApiSecret[]) {
+  constructor(secrets: ApiSecret[], concurrentOffset: number = 0) {
     if (secrets.length === 0) {
       throw new Error("api42 requires at least one 42 Api Key/Secret pair")
     }
@@ -47,6 +48,7 @@ class api42 {
     this._limiters = []
     this._keyCount = secrets.length
     this._currentIndex = 0
+    this._concurrentOffset = concurrentOffset
   }
 
   /*
@@ -59,7 +61,7 @@ class api42 {
       const accessToken = await this.getAccessToken(secret.client_id, secret.client_secret)
       this.storeToken(accessToken, index)
       const limit = await this.getRateLimits(await this.retrieveToken(index))
-      this._limiters.push(this.createLimiter(limit))
+      this._limiters.push(this.createLimiter(limit, this._concurrentOffset))
     }
     console.log(`Limiters length: ${this._limiters.length}`)
     // Schedule a job per limiter to compensate the limiter for the request made earlier to get the rate limits
@@ -216,7 +218,7 @@ class api42 {
     return Promise.reject(`Error getting rate limits: ${response.status} ${response.statusText}`)
   }
 
-  private createLimiter(limit: RateLimit): Bottleneck {
+  private createLimiter(limit: RateLimit, concurrentOffset: number): Bottleneck {
     const limiter = new Bottleneck({
       // Hourly rate limit
       reservoir: limit.hourly_remaining,
@@ -224,7 +226,7 @@ class api42 {
       reservoirRefreshInterval: 1000 * 60 * 60,
 
       // Secondly rate limit
-      maxConcurrent: limit.secondly_limit - 1,
+      maxConcurrent: limit.secondly_limit - concurrentOffset,
       minTime: Math.trunc(1000 / limit.secondly_limit) + 25 // arbitrary slowdown to prevent retries,
     });
 
