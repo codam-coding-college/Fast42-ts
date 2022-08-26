@@ -239,4 +239,6 @@ class api42 {
 
 }
 
+export { Response } from "node-fetch"
+
 export default api42
