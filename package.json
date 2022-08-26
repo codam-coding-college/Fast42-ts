@@ -18,7 +18,6 @@
   "scripts": {
     "tsc": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
     "build": "npm run tsc",
-    "install": "npm run tsc",
     "prepublishOnly": "npm run tsc"
   },
   "keywords": [],
