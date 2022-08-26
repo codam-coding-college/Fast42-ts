@@ -12,6 +12,9 @@
     "type": "git",
     "url": "https://github.com/codam-coding-college/fast42.git"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "tsc": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
     "build": "npm run tsc",
