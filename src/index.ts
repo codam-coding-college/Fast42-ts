@@ -23,6 +23,14 @@ interface ApiSecret {
   client_secret: string,
 }
 
+enum Method {
+  GET = 'GET',
+  POST = 'POST',
+  PUT = 'PUT',
+  DELETE = 'DELETE',
+  PATCH = 'PATCH',
+}
+
 class api42 {
   private _secrets: ApiSecret[]
   private _rootUrl: string
@@ -81,7 +89,7 @@ class api42 {
     const index = this.getCurrentIndexAndSetNext()
     const accessToken = await this.retrieveToken(index)
     const url = this._rootUrl + endpoint + this.parseOptions(options)
-    const response = this.getFromApi(this._limiters[index]!, accessToken, url)
+    const response = this.apiReq(Method.GET, this._limiters[index]!, accessToken, url)
     return response
   }
 
@@ -125,20 +133,44 @@ class api42 {
     return pages
   }
 
+  async post(endpoint: string, body: any): Promise<Response> {
+    if (!this._limiters || this._limiters.length <= 0) {
+      throw new Error("api42 not initialized, please call .init() first")
+    }
+    const index = this.getCurrentIndexAndSetNext()
+    const accessToken = await this.retrieveToken(index)
+    const url = this._rootUrl + endpoint
+    const response = this.apiReqWithBody(Method.POST, this._limiters[index]!, accessToken, url, body)
+    return response
+  }
+
   /*
    *  Private Methods 
    */
 
-  private async getFromApi(limiter: Bottleneck, accessToken: AccessToken, url: string): Promise<Response> {
-    const response = limiter.schedule(async (accessToken, url) => {
-      const response = await fetch(url, {
-        method: "GET",
+  private async apiReq(method: Method.GET | Method.DELETE, limiter: Bottleneck, accessToken: AccessToken, url: string): Promise<Response> {
+    const response = limiter.schedule((accessToken, url) => {
+      return fetch(url, {
+        method: method,
         headers: {
           Authorization: `Bearer ${accessToken.access_token}`
         }
       })
-      return response
     }, accessToken, url)
+    return response
+  }
+
+  private async apiReqWithBody(method: Method.PATCH | Method.POST | Method.DELETE, limiter: Bottleneck, accessToken: AccessToken, url: string, body: any): Promise<Response> {
+    const response = limiter.schedule((accessToken, url, body) => {
+      return fetch(url, {
+        method: method,
+        headers: {
+          'Authorization': `Bearer ${accessToken.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+    }, accessToken, url, body)
     return response
   }
 
