@@ -9,6 +9,31 @@ Features:
 - Multi-key support (be carefull, it might be too fast! 🚀)
 - Convenience: fetch all pages from an endpoint with a single method call!
 
+Public Methods:
+```ts
+// Always call .init() first after constructing Fast42!
+init(): Promise<Fast42>
+
+getPage(url: string, page: string, options?: {
+    [key: string]: string;
+}): Promise<Response>
+
+getAllPages(url: string, options?: {
+    [key: string]: string;
+}, start?: number): Promise<Promise<Response>[]>
+
+get(endpoint: string, options?: {
+    [key: string]: string;
+}): Promise<Response>
+
+delete(endpoint: string): Promise<Response>
+post(endpoint: string, body: any): Promise<Response>
+patch(endpoint: string, body: any): Promise<Response>
+put(endpoint: string, body: any): Promise<Response>
+
+// use a user's accesstoken to make the request, you still need to initialize Fast42 with the same api key used to authenticate the user
+postWithUserAccessToken(accessToken: AccessToken, endpoint: string, body: any): Promise<Response>
+```
 
 ### Install
 ```sh
@@ -18,12 +43,12 @@ npm i @codam/fast42
 Basic usage:
 
 ```ts
-import Api42 from "@codam/fast42"
+import Fast42 from "@codam/fast42"
 
-const api = await new Api42([
+const api = await new Fast42([
   {
-    client_id: <YOUR API CLIENT ID>,
-    client_secret: <YOUR API CLIENT SECRET>,
+    client_id: "<YOUR API CLIENT ID>",
+    client_secret: "<YOUR API CLIENT SECRET>",
   }
 ]).init()
 
@@ -38,7 +63,7 @@ Obviously your id/secret should come from the environment and not be committed t
 How I use it:
 
 ```ts
-import Api42, { Response } from "@codam/fast42"
+import Fast42, { Response } from "@codam/fast42"
 import dotenv from "dotenv";
 
 // utility function for error handling and logging
@@ -58,7 +83,7 @@ function printHeaders(headers: any, print: (arg0: string) => void) {
 }
 
 async function getAll42(
-  api: Api42,
+  api: Fast42,
   url: string,
   options: { [key: string]: string },
   callback: (_: Response) => any,
@@ -72,7 +97,7 @@ async function getAll42(
     let p = await page;
     const pagenr = getPageNumberFromUrl(p.url);
     // retry when the ratelimit was hit
-    // (this can happen because the timing on 42api side is different from the timing of the fast42 ratelimiter)
+    // (this can happen because the timing on 42api side is different from the timing of the Fast42 ratelimiter)
     if (p.status === 429) {
       if (pagenr) {
         p = await api.getPage(url, pagenr, options);
@@ -90,7 +115,7 @@ async function getAll42(
   }));
 }
 
-async function getAll42Cursus(api: Api42) {
+async function getAll42Cursus(api: Fast42) {
   return getAll42(api, "/cursus", {}, async (page) => {
     (await page.json() as any).forEach(async (c: any) => {
       // Insert `c` into DB
@@ -102,7 +127,7 @@ async function getAll42Cursus(api: Api42) {
 
 // Using 2 keys here, but with 8 req/s per key it will might be a bit too fast ;)
 async function main() {
-  const api = await new Api42([
+  const api = await new Fast42([
     {
       client_id: process.env['FTAPI_UID'],
       client_secret: process.env['FTAPI_SECRET'],
