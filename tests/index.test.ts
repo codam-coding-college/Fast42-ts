@@ -1,11 +1,11 @@
-import Api42 from '../src/index';
+import Fast42 from '../src/index';
 
 it("Should instantiate", () => {
-    const api = new Api42([
+    const api = new Fast42([
         {
             client_id: "test",
             client_secret: "test"
         },
     ]);
-    expect(api).toBeInstanceOf(Api42);
+    expect(api).toBeInstanceOf(Fast42);
 })

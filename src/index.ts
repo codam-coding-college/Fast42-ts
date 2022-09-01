@@ -2,13 +2,15 @@ import Bottleneck from "bottleneck";
 import fetch, { Response } from 'node-fetch';
 import NodeCache from 'node-cache';
 
-interface AccessToken {
-  access_token: string
+interface AccessTokenInfo {
+  access_token: AccessToken
   token_type: string
   expires_in: number
   scope: string
   created_at: number
 }
+
+type AccessToken = string
 
 interface RateLimit {
   id: number,
@@ -23,6 +25,13 @@ interface ApiSecret {
   client_secret: string,
 }
 
+interface LimiterPair {
+    appId: number,
+    limiter: Bottleneck,
+    secret: ApiSecret,
+    tokenIndex: number
+}
+
 enum Method {
   GET = 'GET',
   POST = 'POST',
@@ -31,14 +40,15 @@ enum Method {
   PATCH = 'PATCH',
 }
 
-class api42 {
+class Fast42 {
   private _secrets: ApiSecret[]
+  private _limiterPairs: LimiterPair[]
   private _rootUrl: string
-  private _limiters: Bottleneck[]
   private _cache: NodeCache
   private _keyCount: number
   private _currentIndex: number
   private _concurrentOffset: number
+  private NOTINITIALIZED ="Fast42 is not initialized. Call init() first"
 
   /**
    * Constructs the api42 class
@@ -51,12 +61,12 @@ class api42 {
    */
   constructor(secrets: ApiSecret[], concurrentOffset: number = 0) {
     if (secrets.length === 0) {
-      throw new Error("api42 requires at least one 42 Api Key/Secret pair")
+      throw new Error("Fast42 requires at least one 42 Api Key/Secret pair")
     }
     this._secrets = secrets
     this._rootUrl = "https://api.intra.42.fr/v2"
     this._cache = new NodeCache()
-    this._limiters = []
+    this._limiterPairs = []
     this._keyCount = secrets.length
     this._currentIndex = 0
     this._concurrentOffset = concurrentOffset
@@ -66,34 +76,32 @@ class api42 {
    *  Public Methods 
    */
 
-  async init(): Promise<api42> {
+  async init(): Promise<Fast42> {
     for (let index = 0; index < this._keyCount; index++) {
       const secret: ApiSecret = this._secrets[index]!
       const accessToken = await this.getAccessToken(secret.client_id, secret.client_secret)
       this.storeToken(accessToken, index)
-      const limit = await this.getRateLimits(await this.retrieveToken(index))
-      this._limiters.push(this.createLimiter(limit, this._concurrentOffset))
+      const limit = await this.getRateLimits((await this.retrieveToken(index)).access_token)
+      const limiter = this.createLimiter(limit, this._concurrentOffset)
+      this._limiterPairs.push({
+        appId: limit.id,
+        limiter,
+        secret,
+        tokenIndex: index
+      })
     }
-    console.log(`Limiters length: ${this._limiters.length}`)
+    console.log(`Limiters length: ${this._limiterPairs.length}`)
     // Schedule a job per limiter to compensate the limiter for the request made earlier to get the rate limits
-    for (let i = 0; i < this._limiters.length; i++) {
-      this._limiters[i]!.schedule(() => { return Promise.resolve("limiter initialized") })
+    for (let i = 0; i < this._limiterPairs.length; i++) {
+      this._limiterPairs[i]!.limiter.schedule(() => { return Promise.resolve("limiter initialized") })
     }
     return this
   }
 
-  async get(endpoint: string, options?: { [key: string]: string }): Promise<Response> {
-    if (!this._limiters || this._limiters.length <= 0) {
-      throw new Error("api42 not initialized, please call .init() first")
-    }
-    const index = this.getCurrentIndexAndSetNext()
-    const accessToken = await this.retrieveToken(index)
-    const url = this._rootUrl + endpoint + this.parseOptions(options)
-    const response = this.apiReq(Method.GET, this._limiters[index]!, accessToken, url)
-    return response
-  }
-
   async getPage(url: string, page: string, options?: { [key: string]: string }): Promise<Response> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
+    }
     let _options: { [key: string]: string } = {};
     if (options) {
       _options = options;
@@ -104,8 +112,11 @@ class api42 {
     _options['page[number]'] = page
     return this.get(url, _options)
   }
-
+  
   async getAllPages(url: string, options?: { [key: string]: string }, start = 1): Promise<Promise<Response>[]> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
+    }
     let pageSize = 100
     if (options && ('page[size]' in options)) {
       pageSize = parseInt(options['page[size]']!)
@@ -133,14 +144,72 @@ class api42 {
     return pages
   }
 
-  async post(endpoint: string, body: any): Promise<Response> {
-    if (!this._limiters || this._limiters.length <= 0) {
-      throw new Error("api42 not initialized, please call .init() first")
+  async get(endpoint: string, options?: { [key: string]: string }): Promise<Response> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
     }
     const index = this.getCurrentIndexAndSetNext()
-    const accessToken = await this.retrieveToken(index)
+    const url = this._rootUrl + endpoint + this.parseOptions(options)
+    const response = this.apiReq(Method.GET, this._limiterPairs[index]!, url)
+    return response
+  }
+
+  async delete(endpoint: string): Promise<Response> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
+    }
+    const index = this.getCurrentIndexAndSetNext()
     const url = this._rootUrl + endpoint
-    const response = this.apiReqWithBody(Method.POST, this._limiters[index]!, accessToken, url, body)
+    const response = this.apiReq(Method.DELETE, this._limiterPairs[index]!, url)
+    return response
+  }
+
+  async post(endpoint: string, body: any): Promise<Response> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
+    }
+    const index = this.getCurrentIndexAndSetNext()
+    const url = this._rootUrl + endpoint
+    const response = this.apiReqWithBody(Method.POST, this._limiterPairs[index]!, url, body)
+    return response
+  }
+
+  async patch(endpoint: string, body: any): Promise<Response> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
+    }
+    const index = this.getCurrentIndexAndSetNext()
+    const url = this._rootUrl + endpoint
+    const response = this.apiReqWithBody(Method.PATCH, this._limiterPairs[index]!, url, body)
+    return response
+  }
+
+  async put(endpoint: string, body: any): Promise<Response> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
+    }
+    const index = this.getCurrentIndexAndSetNext()
+    const url = this._rootUrl + endpoint
+    const response = this.apiReqWithBody(Method.PUT, this._limiterPairs[index]!, url, body)
+    return response
+  }
+
+  async postWithUserAccessToken(accessToken: AccessToken, endpoint: string, body: any): Promise<Response> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
+    }
+    const limit = await this.getRateLimits(accessToken)
+    const limiter = this._limiterPairs.find((limiterPair) => limiterPair.appId === limit.id)
+    if (limiter === undefined) {
+      throw new Error("AppId not found, you need to initialize fast42 with the API keys used to get the user accessToken")
+    }
+    const limiterWithUserToken = {
+      ...limiter,
+      tokenIndex: -42,
+    }
+    await this.storeToken({ access_token: accessToken, expires_in: 42 }, -42)
+    const url = this._rootUrl + endpoint
+    const response = this.apiReqWithBody(Method.POST, limiterWithUserToken, url, body)
     return response
   }
 
@@ -148,8 +217,9 @@ class api42 {
    *  Private Methods 
    */
 
-  private async apiReq(method: Method.GET | Method.DELETE, limiter: Bottleneck, accessToken: AccessToken, url: string): Promise<Response> {
-    const response = limiter.schedule((accessToken, url) => {
+  private async apiReq(method: Method.GET | Method.DELETE, limiterPair: LimiterPair, url: string): Promise<Response> {
+    const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
+    const response = limiterPair.limiter.schedule((accessToken, url) => {
       return fetch(url, {
         method: method,
         headers: {
@@ -160,8 +230,9 @@ class api42 {
     return response
   }
 
-  private async apiReqWithBody(method: Method.PATCH | Method.POST | Method.DELETE, limiter: Bottleneck, accessToken: AccessToken, url: string, body: any): Promise<Response> {
-    const response = limiter.schedule((accessToken, url, body) => {
+  private async apiReqWithBody(method: Method.PATCH | Method.POST | Method.PUT, limiterPair: LimiterPair, url: string, body: any): Promise<Response> {
+    const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
+    const response = limiterPair.limiter.schedule((accessToken, url, body) => {
       return fetch(url, {
         method: method,
         headers: {
@@ -191,7 +262,7 @@ class api42 {
     return optionsString
   }
 
-  private async getAccessToken(clientid: string, clientsecret: string): Promise<AccessToken> {
+  private async getAccessToken(clientid: string, clientsecret: string): Promise<AccessTokenInfo> {
     const response = await fetch("https://api.intra.42.fr/oauth/token", {
       method: "POST",
       headers: {
@@ -202,16 +273,16 @@ class api42 {
     if (!response.ok) {
       throw new Error(`Error getting access token: ${response.status} ${response.statusText}`)
     }
-    const accessToken = await response.json() as AccessToken
+    const accessToken = await response.json() as AccessTokenInfo
     return accessToken
   }
 
-  private storeToken(accessToken: AccessToken, index: number): void {
+  private storeToken(accessToken: { access_token: AccessToken, expires_in: number}, index: number): void {
     this._cache.set(`accessToken-${index}`, accessToken, accessToken.expires_in)
   }
 
-  private async retrieveToken(index: number): Promise<AccessToken> {
-    const accessToken: AccessToken | undefined = this._cache.get(`accessToken-${index}`)
+  private async retrieveToken(index: number): Promise<AccessTokenInfo> {
+    const accessToken: AccessTokenInfo | undefined = this._cache.get(`accessToken-${index}`)
     if (accessToken) {
       return accessToken
     }
@@ -237,7 +308,7 @@ class api42 {
     const response = await fetch("https://api.intra.42.fr/v2/cursus", {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${accessToken.access_token}`
+        Authorization: `Bearer ${accessToken}`
       }
     })
     if (response.ok) {
@@ -268,12 +339,18 @@ class api42 {
     limiter.on("error", (err) => {
       console.error(err)
     });
-
     return limiter
   }
 
+  private isInitialized(): boolean {
+    if (!this._limiterPairs || this._limiterPairs.length <= 0) {
+      console.error("Fast42 not initialized, please call .init() first")
+      return false
+    }
+    return true
+  }
 }
 
 export { Response } from "node-fetch"
 
-export default api42
+export default Fast42
