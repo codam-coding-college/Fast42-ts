@@ -278,7 +278,7 @@ class Fast42 {
   }
 
   private storeToken(accessToken: { access_token: AccessToken, expires_in: number}, index: number): void {
-    this._cache.set(`accessToken-${index}`, accessToken, accessToken.expires_in)
+    this._cache.set(`accessToken-${index}`, accessToken, accessToken.expires_in - 20) // refetch the token 20 seconds before expiration
   }
 
   private async retrieveToken(index: number): Promise<AccessTokenInfo> {
