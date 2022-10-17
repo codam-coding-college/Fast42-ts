@@ -154,13 +154,13 @@ class Fast42 {
     return response
   }
 
-  async delete(endpoint: string): Promise<Response> {
+  async delete(endpoint: string, body: any): Promise<Response> {
     if (!this.isInitialized()) {
       return Promise.reject(new Error(this.NOTINITIALIZED))
     }
     const index = this.getCurrentIndexAndSetNext()
     const url = this._rootUrl + endpoint
-    const response = this.apiReq(Method.DELETE, this._limiterPairs[index]!, url)
+    const response = this.apiReqWithBody(Method.DELETE, this._limiterPairs[index]!, url, body)
     return response
   }
 
@@ -217,7 +217,7 @@ class Fast42 {
    *  Private Methods 
    */
 
-  private async apiReq(method: Method.GET | Method.DELETE, limiterPair: LimiterPair, url: string): Promise<Response> {
+  private async apiReq(method: Method.GET, limiterPair: LimiterPair, url: string): Promise<Response> {
     const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
     const response = limiterPair.limiter.schedule((accessToken, url) => {
       return fetch(url, {
@@ -230,7 +230,7 @@ class Fast42 {
     return response
   }
 
-  private async apiReqWithBody(method: Method.PATCH | Method.POST | Method.PUT, limiterPair: LimiterPair, url: string, body: any): Promise<Response> {
+  private async apiReqWithBody(method: Method.PATCH | Method.POST | Method.PUT | Method.DELETE, limiterPair: LimiterPair, url: string, body: any): Promise<Response> {
     const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
     const response = limiterPair.limiter.schedule((accessToken, url, body) => {
       return fetch(url, {
