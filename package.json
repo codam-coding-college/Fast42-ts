@@ -35,7 +35,7 @@
   "dependencies": {
     "bottleneck": "^2.19.5",
     "node-cache": "^5.1.2",
-    "node-fetch": "^2.6.2"
+    "node-fetch": "^3.3.0"
   },
   "devDependencies": {
     "@types/node-fetch": "^2.6.2",
