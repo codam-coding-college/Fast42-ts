@@ -20,10 +20,10 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           # always-auth: true
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_CODAMIT_AUTOMATION }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_FAST42 }}
       - run: npm ci
       - run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_CODAMIT_AUTOMATION }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_CODAMIT_AUTOMATION }}
+          NPM_TOKEN: ${{ secrets.NPM_FAST42 }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_FAST42 }}
