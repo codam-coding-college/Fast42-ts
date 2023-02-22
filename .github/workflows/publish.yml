@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: '18.x'
           registry-url: 'https://registry.npmjs.org'
-          always-auth: true
+          # always-auth: true
         env:
          NODE_AUTH_TOKEN: ${{ secrets.NPM_CODAMIT_AUTOMATION }}
       - run: npm ci
