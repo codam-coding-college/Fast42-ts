@@ -8,7 +8,7 @@ Features:
 - Queues requests (using bottleneck)
 - Multi-key support (be carefull, it might be too fast! 🚀)
 - Convenience: fetch all pages from an endpoint with a single method call!
-- Clustering: using Redis you can run multiple instances on the same API keys!
+- Clustering (v2 and up): using Redis you can run multiple instances on the same API keys!
 
 Public Methods:
 ```ts
