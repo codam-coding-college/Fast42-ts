@@ -1,6 +1,7 @@
 import Bottleneck from "bottleneck";
 import fetch, { Response } from 'node-fetch';
 import NodeCache from 'node-cache';
+import { createClient } from "redis";
 
 interface AccessTokenInfo {
   access_token: AccessToken
@@ -29,7 +30,15 @@ interface LimiterPair {
     appId: number,
     limiter: Bottleneck,
     secret: ApiSecret,
-    tokenIndex: number
+    tokenIndex: number,
+    jobOptions: Bottleneck.JobOptions
+}
+
+
+interface RedisConfig {
+  host: string;
+  port: number;
+  password?: string;
 }
 
 enum Method {
@@ -49,6 +58,8 @@ class Fast42 {
   private _currentIndex: number
   private _concurrentOffset: number
   private NOTINITIALIZED ="Fast42 is not initialized. Call init() first"
+  private _redisConfig: RedisConfig | undefined;
+  private _jobExpiration: number;
 
   /**
    * Constructs the api42 class
@@ -58,8 +69,11 @@ class Fast42 {
    * @param {number} concurrentOffset Offset from the maximum concurrent requests per second, to make sure the rate limit is not exceeded.
    *  The default value is 0, which means that the maximum concurrent requests per second is used (but you might get more retries).
    *  Recommended value is 1 if your key can do more than 2 req per second.
+   * @param {RedisConfig} redisConfig Optional Redis configuration object. If provided, bottleneck will use Redis to store the rate limit counters.
+   * This is useful if you want to run multiple instances of your application, and want to share the rate limit counters between them.
+   * 
    */
-  constructor(secrets: ApiSecret[], concurrentOffset: number = 0) {
+  constructor(secrets: ApiSecret[], concurrentOffset: number = 0, jobExpiration: number = 20000, redisConfig?: RedisConfig) {
     if (secrets.length === 0) {
       throw new Error("Fast42 requires at least one 42 Api Key/Secret pair")
     }
@@ -70,6 +84,8 @@ class Fast42 {
     this._keyCount = secrets.length
     this._currentIndex = 0
     this._concurrentOffset = concurrentOffset
+    this._redisConfig = redisConfig
+    this._jobExpiration = jobExpiration
   }
 
   /*
@@ -82,18 +98,29 @@ class Fast42 {
       const accessToken = await this.getAccessToken(secret.client_id, secret.client_secret)
       this.storeToken(accessToken, index)
       const limit = await this.getRateLimits((await this.retrieveToken(index)).access_token)
-      const limiter = this.createLimiter(limit, this._concurrentOffset)
+      let limiter: Bottleneck | undefined;
+      
+      if (this._redisConfig) {
+        limiter = this.createRedisLimiter(limit, this._concurrentOffset, this._redisConfig)
+      } else {
+        limiter = this.createLimiter(limit, this._concurrentOffset)
+      }
+
       this._limiterPairs.push({
         appId: limit.id,
         limiter,
         secret,
-        tokenIndex: index
+        tokenIndex: index,
+        jobOptions: {
+          expiration: this._jobExpiration,
+        }
       })
     }
     console.log(`Limiters length: ${this._limiterPairs.length}`)
     // Schedule a job per limiter to compensate the limiter for the request made earlier to get the rate limits
     for (let i = 0; i < this._limiterPairs.length; i++) {
-      this._limiterPairs[i]!.limiter.schedule(() => { return Promise.resolve("limiter initialized") })
+      this._limiterPairs[i]!.limiter.schedule(this._limiterPairs[i]!.jobOptions, 
+        (): any => { return Promise.resolve("limiter initialized") })
     }
     return this
   }
@@ -212,14 +239,34 @@ class Fast42 {
     const response = this.apiReqWithBody(Method.POST, limiterWithUserToken, url, body)
     return response
   }
+  
+  public async doJob(job: any): Promise<unknown> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
+    }
+    const index = this.getCurrentIndexAndSetNext()
+    const limiterPair = this._limiterPairs[index]!;
+    const response = limiterPair.limiter.schedule(
+      limiterPair.jobOptions, job);
+    return response;
+  }
+
+  public async disconnect() {
+    return Promise.all(this._limiterPairs.map(async (limiterPair) => {
+      return limiterPair.limiter.disconnect()
+    }))
+  }
 
   /*
    *  Private Methods 
    */
 
+
   private async apiReq(method: Method.GET, limiterPair: LimiterPair, url: string): Promise<Response> {
     const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
-    const response = limiterPair.limiter.schedule((accessToken, url) => {
+    const response = limiterPair.limiter.schedule(
+      limiterPair.jobOptions,
+      (accessToken, url) => {
       return fetch(url, {
         method: method,
         headers: {
@@ -232,7 +279,9 @@ class Fast42 {
 
   private async apiReqWithBody(method: Method.PATCH | Method.POST | Method.PUT | Method.DELETE, limiterPair: LimiterPair, url: string, body: any): Promise<Response> {
     const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
-    const response = limiterPair.limiter.schedule((accessToken, url, body) => {
+    const response = limiterPair.limiter.schedule(
+      limiterPair.jobOptions,
+      (accessToken, url, body) => {
       return fetch(url, {
         method: method,
         headers: {
@@ -340,6 +389,42 @@ class Fast42 {
       console.error(err)
     });
     return limiter
+  }
+
+  private createRedisLimiter(limit: RateLimit, concurrentOffset: number, redisConfig: RedisConfig): Bottleneck {
+    // Create a redis client
+    const client = createClient({
+        host: redisConfig.host,
+        port: redisConfig.port,
+        password: redisConfig.password,
+    });
+    
+    client.on('error', function(err) {
+      console.log('Redis client encountered an error: ', err);
+    });
+  
+    const limiter = new Bottleneck({
+      // Redis options
+      id: 'fast42',
+      datastore: 'redis',
+      clearDatastore: false,
+      client: client,
+
+      // Hourly rate limit
+      reservoir: limit.hourly_remaining,
+      reservoirRefreshAmount: limit.hourly_limit,
+      reservoirRefreshInterval: 1000 * 60 * 60,
+  
+      // Secondly rate limit
+      maxConcurrent: limit.secondly_limit - concurrentOffset,
+      minTime: Math.trunc(1000 / limit.secondly_limit) + 25 // arbitrary slowdown to prevent retries,
+    });
+  
+    limiter.on("error", (err) => {
+      console.error(err)
+    });
+    
+    return limiter;
   }
 
   private isInitialized(): boolean {

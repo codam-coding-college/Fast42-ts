@@ -8,9 +8,27 @@ Features:
 - Queues requests (using bottleneck)
 - Multi-key support (be carefull, it might be too fast! 🚀)
 - Convenience: fetch all pages from an endpoint with a single method call!
+- Clustering: using Redis you can run multiple instances on the same API keys!
 
 Public Methods:
 ```ts
+constructor(
+  secrets: ApiSecret[] // Api Secrets, see type below
+  concurrentOffset?: number, // default is 0, can be used to slow down the requests. ex: if your key can do 4 req/s you can set this to 1 to only make 3 req/s. Usefull if your backend or db can't keep up.
+  jobExpiration?: number, // default is 20000ms, especially important when using redis to kill infinite jobs
+  redisConfig?: RedisConfig // config to connect to redis, see below
+);
+
+interface ApiSecret {
+    client_id: string;
+    client_secret: string;
+}
+interface RedisConfig {
+    host: string;
+    port: number;
+    password?: string;
+}
+
 // Always call .init() first after constructing Fast42!
 init(): Promise<Fast42>
 
@@ -33,6 +51,12 @@ put(endpoint: string, body: any): Promise<Response>
 
 // use a user's accesstoken to make the request, you still need to initialize Fast42 with the same api key used to authenticate the user
 postWithUserAccessToken(accessToken: AccessToken, endpoint: string, body: any): Promise<Response>
+
+// used for testing, just runs a random job on the current limiter
+doJob(job: any): Promise<unknown>;
+
+// Important when using redis! Closes the connection and stops logging.
+disconnect(): Promise<void[]>;
 ```
 
 ### Install
@@ -139,4 +163,25 @@ async function main() {
   ], 1).init()
   await getAll42Cursus(api);
 }
+```
+
+Usage with redis:
+```ts
+    const api = await (new Fast42([
+      {
+        client_id: process.env['FTAPI_UID'],
+        client_secret: process.env['FTAPI_SECRET'],
+      },
+    ],
+    0,
+    20000, // setting an expiration on all jobs is important when clustering!
+    {
+        host: "127.0.0.1",
+        port: 6379,
+        password: "somepassword"
+    }).init());
+    const job = await api.get("/projects/1");    
+    const item = await job.json();
+
+    await api.disconnect();
 ```
