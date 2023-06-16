@@ -253,7 +253,7 @@ class Fast42 {
 
   public async disconnect() {
     return Promise.all(this._limiterPairs.map(async (limiterPair) => {
-      return limiterPair.limiter.disconnect()
+      return limiterPair.limiter.disconnect(true)
     }))
   }
 
@@ -394,6 +394,8 @@ class Fast42 {
   private createRedisLimiter(limit: RateLimit, concurrentOffset: number, redisConfig: RedisConfig): Bottleneck {
     // Create a redis client
     const client = createClient(redisConfig.port, redisConfig.host, {
+      port: redisConfig.port,
+      host: redisConfig.host,
       password: redisConfig.password,
     });
 
