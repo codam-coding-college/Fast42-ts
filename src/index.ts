@@ -27,11 +27,11 @@ interface ApiSecret {
 }
 
 interface LimiterPair {
-    appId: number,
-    limiter: Bottleneck,
-    secret: ApiSecret,
-    tokenIndex: number,
-    jobOptions: Bottleneck.JobOptions
+  appId: number,
+  limiter: Bottleneck,
+  secret: ApiSecret,
+  tokenIndex: number,
+  jobOptions: Bottleneck.JobOptions
 }
 
 
@@ -57,7 +57,7 @@ class Fast42 {
   private _keyCount: number
   private _currentIndex: number
   private _concurrentOffset: number
-  private NOTINITIALIZED ="Fast42 is not initialized. Call init() first"
+  private NOTINITIALIZED = "Fast42 is not initialized. Call init() first"
   private _redisConfig: RedisConfig | undefined;
   private _jobExpiration: number;
 
@@ -99,7 +99,7 @@ class Fast42 {
       this.storeToken(accessToken, index)
       const limit = await this.getRateLimits((await this.retrieveToken(index)).access_token)
       let limiter: Bottleneck | undefined;
-      
+
       if (this._redisConfig) {
         limiter = this.createRedisLimiter(limit, this._concurrentOffset, this._redisConfig)
       } else {
@@ -119,7 +119,7 @@ class Fast42 {
     console.log(`Limiters length: ${this._limiterPairs.length}`)
     // Schedule a job per limiter to compensate the limiter for the request made earlier to get the rate limits
     for (let i = 0; i < this._limiterPairs.length; i++) {
-      this._limiterPairs[i]!.limiter.schedule(this._limiterPairs[i]!.jobOptions, 
+      this._limiterPairs[i]!.limiter.schedule(this._limiterPairs[i]!.jobOptions,
         (): any => { return Promise.resolve("limiter initialized") })
     }
     return this
@@ -139,7 +139,7 @@ class Fast42 {
     _options['page[number]'] = page
     return this.get(url, _options)
   }
-  
+
   async getAllPages(url: string, options?: { [key: string]: string }, start = 1): Promise<Promise<Response>[]> {
     if (!this.isInitialized()) {
       return Promise.reject(new Error(this.NOTINITIALIZED))
@@ -239,7 +239,7 @@ class Fast42 {
     const response = this.apiReqWithBody(Method.POST, limiterWithUserToken, url, body)
     return response
   }
-  
+
   public async doJob(job: any): Promise<unknown> {
     if (!this.isInitialized()) {
       return Promise.reject(new Error(this.NOTINITIALIZED))
@@ -267,13 +267,13 @@ class Fast42 {
     const response = limiterPair.limiter.schedule(
       limiterPair.jobOptions,
       (accessToken, url) => {
-      return fetch(url, {
-        method: method,
-        headers: {
-          Authorization: `Bearer ${accessToken.access_token}`
-        }
-      })
-    }, accessToken, url)
+        return fetch(url, {
+          method: method,
+          headers: {
+            Authorization: `Bearer ${accessToken.access_token}`
+          }
+        })
+      }, accessToken, url)
     return response
   }
 
@@ -282,15 +282,15 @@ class Fast42 {
     const response = limiterPair.limiter.schedule(
       limiterPair.jobOptions,
       (accessToken, url, body) => {
-      return fetch(url, {
-        method: method,
-        headers: {
-          'Authorization': `Bearer ${accessToken.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      })
-    }, accessToken, url, body)
+        return fetch(url, {
+          method: method,
+          headers: {
+            'Authorization': `Bearer ${accessToken.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        })
+      }, accessToken, url, body)
     return response
   }
 
@@ -326,7 +326,7 @@ class Fast42 {
     return accessToken
   }
 
-  private storeToken(accessToken: { access_token: AccessToken, expires_in: number}, index: number): void {
+  private storeToken(accessToken: { access_token: AccessToken, expires_in: number }, index: number): void {
     this._cache.set(`accessToken-${index}`, accessToken, accessToken.expires_in - 20) // refetch the token 20 seconds before expiration
   }
 
@@ -393,16 +393,14 @@ class Fast42 {
 
   private createRedisLimiter(limit: RateLimit, concurrentOffset: number, redisConfig: RedisConfig): Bottleneck {
     // Create a redis client
-    const client = createClient({
-        host: redisConfig.host,
-        port: redisConfig.port,
-        password: redisConfig.password,
+    const client = createClient(redisConfig.port, redisConfig.host, {
+      password: redisConfig.password,
     });
-    
-    client.on('error', function(err) {
+
+    client.on('error', function (err) {
       console.log('Redis client encountered an error: ', err);
     });
-  
+
     const limiter = new Bottleneck({
       // Redis options
       id: 'fast42',
@@ -414,16 +412,16 @@ class Fast42 {
       reservoir: limit.hourly_remaining,
       reservoirRefreshAmount: limit.hourly_limit,
       reservoirRefreshInterval: 1000 * 60 * 60,
-  
+
       // Secondly rate limit
       maxConcurrent: limit.secondly_limit - concurrentOffset,
       minTime: Math.trunc(1000 / limit.secondly_limit) + 25 // arbitrary slowdown to prevent retries,
     });
-  
+
     limiter.on("error", (err) => {
       console.error(err)
     });
-    
+
     return limiter;
   }
 
