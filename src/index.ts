@@ -1,7 +1,6 @@
 import Bottleneck from "bottleneck";
 import fetch, { Response } from 'node-fetch';
 import NodeCache from 'node-cache';
-import { createClient } from "redis";
 
 interface AccessTokenInfo {
   access_token: AccessToken
@@ -392,14 +391,6 @@ class Fast42 {
   }
 
   private createRedisLimiter(limit: RateLimit, concurrentOffset: number, redisConfig: RedisConfig): Bottleneck {
-    // Create a redis client
-    // const client = createClient(redisConfig.port, redisConfig.host, {
-    //   password: redisConfig.password,
-    // });
-
-    // client.on('error', function (err) {
-    //   console.log('Redis client encountered an error: ', err);
-    // });
 
     const limiter = new Bottleneck({
       // Redis options
