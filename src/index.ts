@@ -1,6 +1,7 @@
 import Bottleneck from "bottleneck";
 import fetch, { Response } from 'node-fetch';
 import NodeCache from 'node-cache';
+import redis from 'redis';
 
 interface AccessTokenInfo {
   access_token: AccessToken
@@ -402,6 +403,7 @@ class Fast42 {
         port: redisConfig.port,
         password: redisConfig.password,
       },
+      Redis: redis,
 
       // Hourly rate limit
       reservoir: limit.hourly_remaining,
