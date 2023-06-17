@@ -393,22 +393,24 @@ class Fast42 {
 
   private createRedisLimiter(limit: RateLimit, concurrentOffset: number, redisConfig: RedisConfig): Bottleneck {
     // Create a redis client
-    const client = createClient(redisConfig.port, redisConfig.host, {
-      port: redisConfig.port,
-      host: redisConfig.host,
-      password: redisConfig.password,
-    });
+    // const client = createClient(redisConfig.port, redisConfig.host, {
+    //   password: redisConfig.password,
+    // });
 
-    client.on('error', function (err) {
-      console.log('Redis client encountered an error: ', err);
-    });
+    // client.on('error', function (err) {
+    //   console.log('Redis client encountered an error: ', err);
+    // });
 
     const limiter = new Bottleneck({
       // Redis options
       id: 'fast42',
       datastore: 'redis',
       clearDatastore: false,
-      client: client,
+      clientOptions: {
+        host: redisConfig.host,
+        port: redisConfig.port,
+        password: redisConfig.password,
+      },
 
       // Hourly rate limit
       reservoir: limit.hourly_remaining,
