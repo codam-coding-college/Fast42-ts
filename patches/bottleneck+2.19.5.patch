@@ -1,0 +1,13 @@
+diff --git a/node_modules/bottleneck/lib/RedisDatastore.js b/node_modules/bottleneck/lib/RedisDatastore.js
+index dc5943e..747afe4 100644
+--- a/node_modules/bottleneck/lib/RedisDatastore.js
++++ b/node_modules/bottleneck/lib/RedisDatastore.js
+@@ -181,7 +181,7 @@ RedisDatastore = class RedisDatastore {
+               return _this3.runScript(name, args);
+             });
+           }
+-        } else if (e.message === "UNKNOWN_CLIENT") {
++        } else if (e.message === "UNKNOWN_CLIENT" || e.message === "ERR_UNKNOWN_CLIENT") {
+           return _this3.runScript("register_client", [_this3.instance.queued()]).then(() => {
+             return _this3.runScript(name, args);
+           });
