@@ -27,14 +27,12 @@
     "tsc": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
     "build": "npm run tsc",
     "prepublishOnly": "npm run tsc",
-    "test": "jest"
+    "test": "jest",
+    "postinstall": "patch-package"
   },
   "keywords": [],
   "author": "Codam Coding College <it@codam.nl>",
   "license": "ISC",
-  "scripts": {
-    "postinstall": "patch-package"
-  },
   "dependencies": {
     "bottleneck": "^2.19.5",
     "node-cache": "^5.1.2",
