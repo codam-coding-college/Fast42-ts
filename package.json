@@ -33,7 +33,7 @@
   "author": "Codam Coding College <it@codam.nl>",
   "license": "ISC",
   "dependencies": {
-    "@sergiiivzhenko/bottleneck": "^2.19.7",
+    "@sergiiivzhenko/bottleneck": "2.19.7",
     "node-cache": "^5.1.2",
     "node-fetch": "^2.6.2",
     "redis": "^3.1.2"
