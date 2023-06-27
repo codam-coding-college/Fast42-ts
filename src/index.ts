@@ -1,4 +1,4 @@
-import Bottleneck from "bottleneck";
+import Bottleneck from "@sergiiivzhenko/bottleneck";
 import fetch, { Response } from 'node-fetch';
 import NodeCache from 'node-cache';
 import redis from 'redis';
@@ -392,7 +392,6 @@ class Fast42 {
   }
 
   private createRedisLimiter(limit: RateLimit, concurrentOffset: number, redisConfig: RedisConfig): Bottleneck {
-
     const limiter = new Bottleneck({
       // Redis options
       id: 'fast42',
@@ -404,7 +403,7 @@ class Fast42 {
         password: redisConfig.password,
       },
       Redis: redis,
-
+      
       // Hourly rate limit
       reservoir: limit.hourly_remaining,
       reservoirRefreshAmount: limit.hourly_limit,
