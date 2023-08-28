@@ -1,9 +1,13 @@
 lockfileVersion: '6.0'
 
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
 dependencies:
-  bottleneck:
-    specifier: ^2.19.5
-    version: 2.19.5
+  '@sergiiivzhenko/bottleneck':
+    specifier: 2.19.7
+    version: 2.19.7
   node-cache:
     specifier: ^5.1.2
     version: 5.1.2
@@ -20,7 +24,7 @@ devDependencies:
     version: 6.0.1(semantic-release@21.0.5)
   '@semantic-release/commit-analyzer':
     specifier: ^10.0.1
-    version: 10.0.1(semantic-release@21.0.5)
+    version: 10.0.3(semantic-release@21.0.5)
   '@semantic-release/git':
     specifier: ^10.0.1
     version: 10.0.1(semantic-release@21.0.5)
@@ -838,8 +842,8 @@ packages:
       semantic-release: 21.0.5
     dev: true
 
-  /@semantic-release/commit-analyzer@10.0.1(semantic-release@21.0.5):
-    resolution: {integrity: sha512-9ejHzTAijYs9z246sY/dKBatmOPcd0GQ7lH4MgLCkv1q4GCiDZRkjHJkaQZXZVaK7mJybS+sH3Ng6G8i3pYMGQ==}
+  /@semantic-release/commit-analyzer@10.0.3(semantic-release@21.0.5):
+    resolution: {integrity: sha512-pe45eTjaJBsZbJrT6AvcTzYYS9OJF3MGABTPFSpwmnfSXVmyfFuloO92pj6EVTbx6JGEUgpoipnITbWn+zyvaw==}
     engines: {node: '>=18'}
     peerDependencies:
       semantic-release: '>=20.1.0'
@@ -955,6 +959,10 @@ packages:
     transitivePeerDependencies:
       - supports-color
     dev: true
+
+  /@sergiiivzhenko/bottleneck@2.19.7:
+    resolution: {integrity: sha512-Wm06FyMoTsbVTO1CPQ5CubsB9x4uTSpi0C3W9TMYKOwcIEuXEtR6lRxtmpQe42Eic9assvGt+Po5rXsDPjzAMA==}
+    dev: false
 
   /@sinclair/typebox@0.24.51:
     resolution: {integrity: sha512-1P1OROm/rdubP5aFDSZQILU0vrLCJ4fvHt6EoqHEM+2D/G5MK3bIaymUKLit8Js9gbns5UyJnkP/TZROLw4tUA==}
@@ -1270,6 +1278,7 @@ packages:
 
   /bottleneck@2.19.5:
     resolution: {integrity: sha512-VHiNCbI1lKdl44tGrhNfU3lup0Tj/ZBMJB5/2ZbNXRCPuRCO7ed2mgcK4r17y+KB2EfuYuRaVlwNbAeaWGSpbw==}
+    dev: true
 
   /brace-expansion@1.1.11:
     resolution: {integrity: sha512-iCuPHDFgrHX7H2vEI/5xpz07zSHB00TpugqhmYtVmMO6518mCuRMoOYFldEBl0g187ufozdaHgWKcYFb61qGiA==}
@@ -3592,7 +3601,7 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
     dependencies:
-      '@semantic-release/commit-analyzer': 10.0.1(semantic-release@21.0.5)
+      '@semantic-release/commit-analyzer': 10.0.3(semantic-release@21.0.5)
       '@semantic-release/error': 4.0.0
       '@semantic-release/github': 9.0.3(semantic-release@21.0.5)
       '@semantic-release/npm': 10.0.4(semantic-release@21.0.5)
