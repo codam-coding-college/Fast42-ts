@@ -1,4 +1,4 @@
-import Fast42 from '../src/index';
+import Fast42, { BottleneckError } from '../src/index';
 
 const client_id = "test";
 const client_secret = "test";
@@ -25,6 +25,14 @@ it("Should instantiate using Redis", () => {
         password: undefined,
     });
     expect(api).toBeInstanceOf(Fast42);
+})
+
+it("Should export BottleneckError", () => {
+    expect(BottleneckError).toBeDefined();
+    const err = new BottleneckError("test error");
+    expect(err).toBeInstanceOf(Error);
+    expect(err).toBeInstanceOf(BottleneckError);
+    expect(err.message).toBe("test error");
 })
 
 // it("initializes using real keys", async () => {
