@@ -73,7 +73,7 @@ class Fast42 {
    * This is useful if you want to run multiple instances of your application, and want to share the rate limit counters between them.
    * 
    */
-  constructor(secrets: ApiSecret[], concurrentOffset: number = 0, jobExpiration: number = 20000, redisConfig?: RedisConfig) {
+  constructor(secrets: ApiSecret[], concurrentOffset: number = 0, jobExpiration: number = 60000, redisConfig?: RedisConfig) {
     if (secrets.length === 0) {
       throw new Error("Fast42 requires at least one 42 Api Key/Secret pair")
     }
