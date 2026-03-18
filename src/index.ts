@@ -432,7 +432,4 @@ class Fast42 {
 
 export { Response } from "node-fetch"
 
-const BottleneckError = Bottleneck.BottleneckError;
-export { BottleneckError };
-
 export default Fast42
