@@ -14,10 +14,15 @@ Public Methods:
 ```ts
 constructor(
   secrets: ApiSecret[] // Api Secrets, see type below
-  concurrentOffset?: number, // default is 0, can be used to slow down the requests. ex: if your key can do 4 req/s you can set this to 1 to only make 3 req/s. Usefull if your backend or db can't keep up.
-  jobExpiration?: number, // default is 20000ms, especially important when using redis to kill infinite jobs
-  redisConfig?: RedisConfig // config to connect to redis, see below
+  settings?: Fast42Settings
 );
+
+interface Fast42Settings {
+    concurrentOffset?: number; // default is 0, can be used to slow down the requests. ex: if your key can do 4 req/s you can set this to 1 to only make 3 req/s. Usefull if your backend or db can't keep up.
+    jobExpiration?: number; // default is 60000ms, especially important when using redis to kill infinite jobs
+    redisConfig?: RedisConfig; // config to connect to redis, see below
+    scopes?: string[]; // default is ['public', 'projects']
+}
 
 interface ApiSecret {
     client_id: string;
@@ -160,7 +165,7 @@ async function main() {
       client_id: process.env['FTAPI_UID1'],
       client_secret: process.env['FTAPI_SECRET1'],
     }
-  ], 1).init()
+  ], { concurrentOffset: 1 }).init()
   await getAll42Cursus(api);
 }
 ```
@@ -172,13 +177,15 @@ Usage with redis:
         client_id: process.env['FTAPI_UID'],
         client_secret: process.env['FTAPI_SECRET'],
       },
-    ],
-    0,
-    20000, // setting an expiration on all jobs is important when clustering!
-    {
+    ], {
+      concurrentOffset: 0,
+      jobExpiration: 20000, // setting an expiration on all jobs is important when clustering!
+      redisConfig: {
         host: "127.0.0.1",
         port: 6379,
         password: "somepassword"
+      },
+      scopes: ["public", "projects"],
     }).init());
     const job = await api.get("/projects/1");    
     const item = await job.json();
