@@ -41,6 +41,13 @@ interface RedisConfig {
   password?: string;
 }
 
+interface Fast42Settings {
+  concurrentOffset?: number;
+  jobExpiration?: number;
+  redisConfig?: RedisConfig;
+  scopes?: string[];
+}
+
 enum Method {
   GET = 'GET',
   POST = 'POST',
@@ -60,6 +67,7 @@ class Fast42 {
   private NOTINITIALIZED = "Fast42 is not initialized. Call init() first"
   private _redisConfig: RedisConfig | undefined;
   private _jobExpiration: number;
+  private _scopes: string[];
 
   /**
    * Constructs the api42 class
@@ -73,19 +81,34 @@ class Fast42 {
    * This is useful if you want to run multiple instances of your application, and want to share the rate limit counters between them.
    * 
    */
-  constructor(secrets: ApiSecret[], concurrentOffset: number = 0, jobExpiration: number = 60000, redisConfig?: RedisConfig) {
+  constructor(secrets: ApiSecret[], settings?: Fast42Settings)
+  constructor(secrets: ApiSecret[], concurrentOffset?: number, jobExpiration?: number, redisConfig?: RedisConfig)
+  constructor(
+    secrets: ApiSecret[],
+    settingsOrConcurrentOffset: Fast42Settings | number = 0,
+    jobExpiration: number = 60000,
+    redisConfig?: RedisConfig,
+  ) {
     if (secrets.length === 0) {
       throw new Error("Fast42 requires at least one 42 Api Key/Secret pair")
     }
+    const settings: Fast42Settings = typeof settingsOrConcurrentOffset === 'object'
+      ? settingsOrConcurrentOffset
+      : {
+        concurrentOffset: settingsOrConcurrentOffset,
+        jobExpiration,
+        redisConfig,
+      }
     this._secrets = secrets
     this._rootUrl = "https://api.intra.42.fr/v2"
     this._cache = new NodeCache()
     this._limiterPairs = []
     this._keyCount = secrets.length
     this._currentIndex = 0
-    this._concurrentOffset = concurrentOffset
-    this._redisConfig = redisConfig
-    this._jobExpiration = jobExpiration
+    this._concurrentOffset = settings.concurrentOffset ?? 0
+    this._redisConfig = settings.redisConfig
+    this._jobExpiration = settings.jobExpiration ?? 60000
+    this._scopes = settings.scopes ?? ['public', 'projects']
   }
 
   /*
@@ -317,7 +340,7 @@ class Fast42 {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      body: `grant_type=client_credentials&client_id=${clientid}&client_secret=${clientsecret}&scope=projects%20public`
+      body: `grant_type=client_credentials&client_id=${clientid}&client_secret=${clientsecret}&scope=${this._scopes.join('%20')}`
     })
     if (!response.ok) {
       throw new Error(`Error getting access token: ${response.status} ${response.statusText}`)

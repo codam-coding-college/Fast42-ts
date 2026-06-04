@@ -1,7 +1,15 @@
 import Fast42 from '../src/index';
+import fetch from 'node-fetch';
+
+jest.mock('node-fetch', () => jest.fn());
 
 const client_id = "test";
 const client_secret = "test";
+const mockedFetch = fetch as unknown as jest.Mock;
+
+beforeEach(() => {
+    mockedFetch.mockReset();
+});
 
 it("Should instantiate", () => {
     const api = new Fast42([
@@ -25,6 +33,58 @@ it("Should instantiate using Redis", () => {
         password: undefined,
     });
     expect(api).toBeInstanceOf(Fast42);
+})
+
+it("Should instantiate with settings object and scopes", () => {
+    const api = new Fast42([
+        {
+            client_id: client_id,
+            client_secret: client_secret,
+        },
+    ], {
+        concurrentOffset: 0,
+        jobExpiration: 2000,
+        scopes: ['public', 'projects', 'profile'],
+    });
+    expect(api).toBeInstanceOf(Fast42);
+})
+
+it("Should default scopes to public and projects", () => {
+    const api = new Fast42([
+        {
+            client_id: client_id,
+            client_secret: client_secret,
+        },
+    ]);
+    expect((api as any)._scopes).toEqual(['public', 'projects']);
+})
+
+it("Should use configured scopes when requesting access token", async () => {
+    mockedFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+            access_token: 'token',
+            token_type: 'bearer',
+            expires_in: 7200,
+            scope: 'public projects profile',
+            created_at: 0
+        })
+    } as any);
+    const api = new Fast42([
+        {
+            client_id: client_id,
+            client_secret: client_secret,
+        },
+    ], {
+        scopes: ['public', 'projects', 'profile'],
+    });
+    await (api as any).getAccessToken('id', 'secret');
+    expect(mockedFetch).toHaveBeenCalledWith(
+        "https://api.intra.42.fr/oauth/token",
+        expect.objectContaining({
+            body: expect.stringContaining("scope=public%20projects%20profile")
+        })
+    );
 })
 
 // it("initializes using real keys", async () => {
