@@ -32,10 +32,12 @@
   "keywords": [],
   "author": "Codam Coding College <it@codam.nl>",
   "license": "ISC",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@sergiiivzhenko/bottleneck": "2.19.7",
     "node-cache": "^5.1.2",
-    "node-fetch": "^2.6.2",
     "redis": "^3.1.2"
   },
   "devDependencies": {
@@ -44,7 +46,7 @@
     "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^9.0.3",
     "@types/jest": "^28.1.8",
-    "@types/node-fetch": "^2.6.2",
+    "@types/node": "^18.19.0",
     "@types/redis": "^2.8.30",
     "jest": "^28.0.0",
     "semantic-release": "^21.0.5",
