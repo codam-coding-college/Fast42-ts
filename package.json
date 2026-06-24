@@ -18,7 +18,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/codam-coding-college/fast42.git"
+    "url": "https://github.com/codam-coding-college/Fast42-ts.git"
   },
   "publishConfig": {
     "access": "public"
