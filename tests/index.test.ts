@@ -3,7 +3,15 @@ import Fast42 from '../src/index';
 const client_id = "test";
 const client_secret = "test";
 const mockedFetch = jest.fn();
-global.fetch = mockedFetch as unknown as typeof fetch;
+const originalFetch = globalThis.fetch;
+
+beforeAll(() => {
+    globalThis.fetch = mockedFetch as unknown as typeof fetch;
+});
+
+afterAll(() => {
+    globalThis.fetch = originalFetch;
+});
 
 beforeEach(() => {
     mockedFetch.mockReset();
