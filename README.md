@@ -7,6 +7,7 @@ Features:
 - Automatically determines the rate limit of your API key.
 - Queues requests (using bottleneck)
 - Multi-key support (be carefull, it might be too fast! 🚀)
+- Automatic retries on rate-limit (429) and server (5xx) errors, with back-off.
 - Convenience: fetch all pages from an endpoint with a single method call!
 - Clustering (v2.1 and up): using Redis you can run multiple instances on the same API keys!
 
@@ -22,6 +23,7 @@ interface Fast42Settings {
     jobExpiration?: number; // default is 60000ms, especially important when using redis to kill infinite jobs
     redisConfig?: RedisConfig; // config to connect to redis, see below
     scopes?: string[]; // default is ['public', 'projects']
+    retry?: RetryConfig; // automatic retry behaviour, see below
 }
 
 interface ApiSecret {
@@ -32,6 +34,13 @@ interface RedisConfig {
     host: string;
     port: number;
     password?: string;
+}
+interface RetryConfig {
+    enabled?: boolean; // master switch, default is true
+    maxServerErrorRetries?: number; // max retries on 5xx errors per request, default is 5. 429s are always retried indefinitely.
+    serverErrorBackoff?: number; // base ms to wait before retrying a 5xx error, default is 30000
+    retryAfterFallback?: number; // seconds to wait on a 429 when no Retry-After header is present, default is 1
+    jitter?: number; // max random extra ms added to every retry wait, default is 10000
 }
 
 // Always call .init() first after constructing Fast42!
@@ -88,6 +97,29 @@ const pages = await api.getAllPages(`/campus/${campus_id}/users`, {
 ```
 
 Obviously your id/secret should come from the environment and not be committed to git. (I recommend using a `.env` file and the `dotenv` package)
+
+### Retries
+
+The rate limiter does its best to stay under your key's limits, but the 42 API counts requests on its own clock, so an occasional `429 Too Many Requests` can still slip through (especially when running multiple instances). Fast42 therefore retries automatically:
+
+- **429 (rate limit):** retried indefinitely, waiting for the duration of the `Retry-After` header (or `retryAfterFallback` seconds when it is absent). Applies to every request, including writes — a 429 is rejected before processing, so it is always safe to retry.
+- **5xx (server error):** retried up to `maxServerErrorRetries` times (default 5), waiting `serverErrorBackoff` ms between attempts. Only `GET` requests are retried on 5xx, since writes (`post`/`put`/`patch`/`delete`) may not be idempotent. After the retries are exhausted the last `Response` is returned, so existing `.ok`/`.status` checks keep working.
+
+Every retry goes back through the rate limiter, and a random `jitter` (up to 10s by default) is added to each wait to spread retries out. Retries can be tuned or disabled via the `retry` setting:
+
+```ts
+const api = await new Fast42([{ client_id, client_secret }], {
+  retry: {
+    enabled: true,            // set to false to get the raw Response back without retrying
+    maxServerErrorRetries: 3,
+    serverErrorBackoff: 30000,
+    retryAfterFallback: 1,
+    jitter: 10000,
+  },
+}).init();
+```
+
+This means your own code generally no longer needs a 429/5xx retry loop around `get`/`getAllPages`.
 
 How I use it:
 
