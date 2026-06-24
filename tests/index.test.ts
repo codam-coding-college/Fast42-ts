@@ -1,11 +1,9 @@
 import Fast42 from '../src/index';
-import fetch from 'node-fetch';
-
-jest.mock('node-fetch', () => jest.fn());
 
 const client_id = "test";
 const client_secret = "test";
-const mockedFetch = fetch as unknown as jest.Mock;
+const mockedFetch = jest.fn();
+global.fetch = mockedFetch as unknown as typeof fetch;
 
 beforeEach(() => {
     mockedFetch.mockReset();

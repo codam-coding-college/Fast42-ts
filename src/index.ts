@@ -1,5 +1,4 @@
 import Bottleneck from "@sergiiivzhenko/bottleneck";
-import fetch, { Response } from 'node-fetch';
 import NodeCache from 'node-cache';
 import redis from 'redis';
 
@@ -453,6 +452,7 @@ class Fast42 {
   }
 }
 
-export { Response } from "node-fetch"
+export const Response = globalThis.Response
+export type Response = globalThis.Response
 
 export default Fast42
