@@ -155,17 +155,12 @@ async function getAll42(
 
   // Attach a callback function to be called when the page promise resolves
   return Promise.all(pages.map(async (page) => {
-    let p = await page;
+    const p = await page;
     const pagenr = getPageNumberFromUrl(p.url);
-    // retry when the ratelimit was hit
-    // (this can happen because the timing on 42api side is different from the timing of the Fast42 ratelimiter)
-    if (p.status === 429) {
-      if (pagenr) {
-        p = await api.getPage(url, pagenr, options);
-      } else {
-        console.error(`Failed retry on unkown page for ${url}`);
-      }
-    }
+    // No manual 429 retry needed: Fast42 retries rate-limited (429) requests
+    // automatically, so any page we get here has already passed the rate limiter.
+    // (This used to be required because the timing on the 42api side differs from
+    // the timing of the Fast42 ratelimiter.)
     if (p.ok) {
       console.log(`Recieved ${url} page: ${pagenr}`);
       return callback(p);
