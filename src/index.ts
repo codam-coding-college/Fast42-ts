@@ -40,11 +40,29 @@ interface RedisConfig {
   password?: string;
 }
 
+interface RetryConfig {
+  /** Master switch for automatic retries. Default: true. */
+  enabled?: boolean;
+  /**
+   * Maximum number of retries for 5xx server errors (per request).
+   * 429 rate-limit responses are always retried, indefinitely, respecting Retry-After.
+   * Default: 5.
+   */
+  maxServerErrorRetries?: number;
+  /** Base delay in ms to wait before retrying a 5xx server error. Default: 30000. */
+  serverErrorBackoff?: number;
+  /** Delay in seconds to wait on a 429 when the Retry-After header is missing. Default: 1. */
+  retryAfterFallback?: number;
+  /** Maximum random extra delay in ms added to every retry wait (spreads out retries). Default: 10000. */
+  jitter?: number;
+}
+
 interface Fast42Settings {
   concurrentOffset?: number;
   jobExpiration?: number;
   redisConfig?: RedisConfig;
   scopes?: string[];
+  retry?: RetryConfig;
 }
 
 enum Method {
@@ -67,6 +85,7 @@ class Fast42 {
   private _redisConfig: RedisConfig | undefined;
   private _jobExpiration: number;
   private _scopes: string[];
+  private _retry: Required<RetryConfig>;
 
   /**
    * Constructs the api42 class
@@ -108,6 +127,13 @@ class Fast42 {
     this._redisConfig = settings.redisConfig
     this._jobExpiration = settings.jobExpiration ?? 60000
     this._scopes = settings.scopes ?? ['public', 'projects']
+    this._retry = {
+      enabled: settings.retry?.enabled ?? true,
+      maxServerErrorRetries: settings.retry?.maxServerErrorRetries ?? 5,
+      serverErrorBackoff: settings.retry?.serverErrorBackoff ?? 30000,
+      retryAfterFallback: settings.retry?.retryAfterFallback ?? 1,
+      jitter: settings.retry?.jitter ?? 10000,
+    }
   }
 
   /*
@@ -285,35 +311,71 @@ class Fast42 {
 
 
   private async apiReq(method: Method.GET, limiterPair: LimiterPair, url: string): Promise<Response> {
-    const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
-    const response = limiterPair.limiter.schedule(
-      limiterPair.jobOptions,
-      (accessToken, url) => {
-        return fetch(url, {
-          method: method,
-          headers: {
-            Authorization: `Bearer ${accessToken.access_token}`
-          }
-        })
-      }, accessToken, url)
-    return response
+    // GET requests are idempotent, so it is safe to retry them on server errors as well.
+    return this.scheduleWithRetry(limiterPair, true, async () => {
+      const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
+      return fetch(url, {
+        method: method,
+        headers: {
+          Authorization: `Bearer ${accessToken.access_token}`
+        }
+      })
+    })
   }
 
   private async apiReqWithBody(method: Method.PATCH | Method.POST | Method.PUT | Method.DELETE, limiterPair: LimiterPair, url: string, body: any): Promise<Response> {
-    const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
-    const response = limiterPair.limiter.schedule(
-      limiterPair.jobOptions,
-      (accessToken, url, body) => {
-        return fetch(url, {
-          method: method,
-          headers: {
-            'Authorization': `Bearer ${accessToken.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
-        })
-      }, accessToken, url, body)
-    return response
+    // Writes may not be idempotent, so we only retry rate-limit (429) responses (which are
+    // rejected before processing and therefore safe to retry), not 5xx server errors.
+    return this.scheduleWithRetry(limiterPair, false, async () => {
+      const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
+      return fetch(url, {
+        method: method,
+        headers: {
+          'Authorization': `Bearer ${accessToken.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+    })
+  }
+
+  /**
+   * Schedules a request on the given limiter and transparently retries it on rate-limit (429)
+   * and, optionally, server-error (5xx) responses. Each (re)try goes through the limiter again,
+   * so the rate limiter keeps accounting for retried requests.
+   *
+   * 429 responses are retried indefinitely, waiting for the duration of the Retry-After header
+   * (falling back to retryAfterFallback seconds when absent). 5xx responses are retried up to
+   * maxServerErrorRetries times when retryServerErrors is true. After exhausting the 5xx retries,
+   * the last response is returned so the caller can inspect it (the return contract is unchanged).
+   */
+  private async scheduleWithRetry(limiterPair: LimiterPair, retryServerErrors: boolean, job: () => Promise<Response>): Promise<Response> {
+    let serverErrorRetries = 0
+    while (true) {
+      const response: Response = await limiterPair.limiter.schedule(limiterPair.jobOptions, job)
+
+      if (this._retry.enabled && response.status === 429) {
+        const retryAfterHeader = parseInt(response.headers.get('retry-after') ?? '')
+        const retryAfter = Number.isNaN(retryAfterHeader) ? this._retry.retryAfterFallback : retryAfterHeader
+        await this.delay(retryAfter * 1000 + Math.random() * this._retry.jitter)
+        continue
+      }
+
+      if (this._retry.enabled && retryServerErrors && response.status >= 500 && response.status < 600) {
+        if (serverErrorRetries >= this._retry.maxServerErrorRetries) {
+          return response
+        }
+        serverErrorRetries++
+        await this.delay(this._retry.serverErrorBackoff + Math.random() * this._retry.jitter)
+        continue
+      }
+
+      return response
+    }
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   private parseOptions(options: { [key: string]: string } | undefined): string {
