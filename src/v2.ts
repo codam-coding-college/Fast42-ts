@@ -1,7 +1,7 @@
 import Bottleneck from "@sergiiivzhenko/bottleneck";
 import NodeCache from 'node-cache';
 import redis from 'redis';
-import { Method, RetryConfig, parseOptions, resolveRetry, runWithRetry } from './shared';
+import { Method, RetryConfig, parseOptions, resolveRetry, runWithRetry } from './shared.js';
 
 interface AccessTokenInfo {
   access_token: AccessToken

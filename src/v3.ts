@@ -1,4 +1,4 @@
-import { Method, RetryConfig, parseOptions, resolveRetry, runWithRetry } from './shared';
+import { Method, RetryConfig, parseOptions, resolveRetry, runWithRetry } from './shared.js';
 
 /**
  * The Intra v3 API is not a single versioned host like v2. It is a collection of independent
