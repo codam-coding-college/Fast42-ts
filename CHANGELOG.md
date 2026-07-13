@@ -1,3 +1,10 @@
+# [3.1.0](https://github.com/codam-coding-college/Fast42-ts/compare/v3.0.0...v3.1.0) (2026-07-13)
+
+
+### Features
+
+* add Intra v3 API support ([#54](https://github.com/codam-coding-college/Fast42-ts/issues/54)) ([7acdc93](https://github.com/codam-coding-college/Fast42-ts/commit/7acdc9331607db5a4ddc762523a4c8295344b3aa))
+
 # [3.0.0](https://github.com/codam-coding-college/Fast42-ts/compare/v2.2.0...v3.0.0) (2026-06-24)
 
 
