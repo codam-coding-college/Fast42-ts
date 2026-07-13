@@ -284,8 +284,8 @@ class Fast42v3 {
     return {
       accessToken: token.access_token,
       refreshToken: token.refresh_token,
-      accessExpiresAt: now + (token.expires_in - TOKEN_EXPIRY_BUFFER_S) * 1000,
-      refreshExpiresAt: now + (token.refresh_expires_in - TOKEN_EXPIRY_BUFFER_S) * 1000,
+      accessExpiresAt: now + Math.max(0, token.expires_in - TOKEN_EXPIRY_BUFFER_S) * 1000,
+      refreshExpiresAt: now + Math.max(0, token.refresh_expires_in - TOKEN_EXPIRY_BUFFER_S) * 1000,
     }
   }
 

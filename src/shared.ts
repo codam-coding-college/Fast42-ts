@@ -15,7 +15,7 @@ export interface RetryConfig {
   enabled?: boolean;
   /**
    * Maximum number of retries for 5xx server errors (per request).
-   * 429 rate-limit responses are always retried, indefinitely, respecting Retry-After.
+   * When retries are enabled, 429 rate-limit responses are retried indefinitely, respecting Retry-After.
    * Default: 5.
    */
   maxServerErrorRetries?: number;
@@ -65,10 +65,9 @@ export function parseOptions(options: { [key: string]: string } | undefined): st
  * client passes in (the v2 client routes every attempt through its Bottleneck limiter, the v3
  * client calls fetch directly since v3 has no rate limits).
  *
- * 429 responses are retried indefinitely, waiting for the duration of the Retry-After header
- * (falling back to retryAfterFallback seconds when absent). 5xx responses are retried up to
- * maxServerErrorRetries times when retryServerErrors is true. After exhausting the 5xx retries,
- * the last response is returned so the caller can inspect it.
+ * When retry.enabled is true, 429 responses are retried indefinitely, waiting for the duration of the Retry-After header
+ * (falling back to retryAfterFallback seconds when absent). 5xx responses are retried up to maxServerErrorRetries times
+ * when retryServerErrors is true. After exhausting the 5xx retries, the last response is returned so the caller can inspect it.
  */
 export async function runWithRetry(retry: Required<RetryConfig>, retryServerErrors: boolean, job: () => Promise<Response>): Promise<Response> {
   let serverErrorRetries = 0
