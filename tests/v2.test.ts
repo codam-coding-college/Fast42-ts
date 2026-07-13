@@ -1,4 +1,4 @@
-import Fast42 from '../src/index';
+import Fast42 from '../src/v2';
 
 const client_id = "test";
 const client_secret = "test";

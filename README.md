@@ -98,6 +98,76 @@ const pages = await api.getAllPages(`/campus/${campus_id}/users`, {
 
 Obviously your id/secret should come from the environment and not be committed to git. (I recommend using a `.env` file and the `dotenv` package)
 
+### Intra v3 API (`Fast42v3`)
+
+The Intra **v3** API is not a versioned path on `api.intra.42.fr` — it is a set of independent microservices, each on its own host with its own internal version:
+
+| Service | Host | Version |
+| --- | --- | --- |
+| Paced System | `pace-system.42.fr` | `v1` |
+| Freezes | `freeze.42.fr` | `v2` |
+| Chronos | `chronos.42.fr` | `v1` |
+| Alumni Management | `alumni-management.42.fr` | `v1` |
+
+It also authenticates completely differently from v2: instead of the `client_credentials` grant, v3 uses an OIDC (Keycloak) provider with the **Resource Owner Password Credentials** grant — separate OIDC client credentials plus a 42 username/password, and (if the account has 2FA) a one-time TOTP code. Tokens are refreshed automatically via the refresh token. v3 has **no documented rate limits**, so `Fast42v3` has no Bottleneck limiter (429/5xx retries still apply).
+
+Because the two APIs share almost nothing, v3 lives in a **separate client**, `Fast42v3`. Use it alongside `Fast42` (v2) as needed.
+
+```ts
+import { Fast42v3 } from "@codam/fast42"
+
+const v3 = await new Fast42v3({
+  clientId: process.env['FT_OIDC_UID']!,      // OIDC_RP_CLIENT_ID
+  clientSecret: process.env['FT_OIDC_SECRET']!, // OIDC_RP_CLIENT_SECRET
+  username: process.env['FT_USERNAME']!,
+  password: process.env['FT_PASSWORD']!,
+  // totp: "123456",   // only if the account has 2FA enabled
+}).init()
+
+// Every call takes the service subdomain and its version explicitly:
+const milestones = await v3.get('pace-system', 'v1', '/milestones')
+const attendances = await v3.get('chronos', 'v1', '/attendances', { campus_id: '14' })
+
+// Pagination uses `page` + `size` (v3 returns the total page count in the body):
+const pages = await v3.getAllPages('pace-system', 'v1', '/milestones')
+```
+
+`Fast42v3` config:
+
+```ts
+interface Fast42v3Config {
+  clientId: string;      // OIDC_RP_CLIENT_ID
+  clientSecret: string;  // OIDC_RP_CLIENT_SECRET
+  username: string;      // 42 username (for the ROPC grant)
+  password: string;      // 42 password (for the ROPC grant)
+  totp?: string;         // one-time code, only if 2FA is enabled (consumed by the initial grant)
+  tokenUrl?: string;     // defaults to https://auth.42.fr/auth/realms/staff-42/protocol/openid-connect/token
+  retry?: RetryConfig;   // same retry semantics as the v2 client
+}
+```
+
+Public methods:
+
+```ts
+init(): Promise<Fast42v3> // authenticate; call before anything else
+
+get(service: string, version: string, endpoint: string, options?: { [key: string]: string }): Promise<Response>
+post(service: string, version: string, endpoint: string, body: any): Promise<Response>
+patch(service: string, version: string, endpoint: string, body: any): Promise<Response>
+put(service: string, version: string, endpoint: string, body: any): Promise<Response>
+delete(service: string, version: string, endpoint: string, body?: any): Promise<Response>
+
+getPage(service: string, version: string, endpoint: string, page: string, options?: { [key: string]: string }): Promise<Response>
+getAllPages(service: string, version: string, endpoint: string, options?: { [key: string]: string }, start?: number): Promise<Promise<Response>[]>
+
+// Force a token refresh. If the refresh token has expired on a 2FA account, pass a fresh TOTP:
+refreshToken(totp?: string): Promise<void>
+
+disconnect(): Promise<void> // clears cached tokens
+```
+
+> **Note:** v3's password + TOTP grant is inherently interactive. It is only unattended-friendly when the service account has 2FA disabled (username/password only, with automatic refresh). With 2FA enabled you must supply a fresh TOTP via `refreshToken(totp)` whenever the refresh token expires.
+
 ### Retries
 
 The rate limiter does its best to stay under your key's limits, but the 42 API counts requests on its own clock, so an occasional `429 Too Many Requests` can still slip through (especially when running multiple instances). Fast42 therefore retries automatically:
