@@ -1,7 +1,7 @@
 import Bottleneck from "@sergiiivzhenko/bottleneck";
 import NodeCache from 'node-cache';
 import redis from 'redis';
-import { Method, RetryConfig, parseOptions, resolveRetry, runWithRetry } from './shared.js';
+import { Method, RetryConfig, TOKEN_EXPIRY_BUFFER_S, parseOptions, resolveRetry, runWithRetry } from './shared.js';
 
 interface AccessTokenInfo {
   access_token: AccessToken
@@ -58,6 +58,8 @@ class Fast42 {
   private _currentIndex: number
   private _concurrentOffset: number
   private NOTINITIALIZED = "Fast42 is not initialized. Call init() first"
+  /** Guards against concurrent (re)authentications firing multiple token requests per key at once. */
+  private _pendingTokens: Map<number, Promise<AccessTokenInfo>>
   private _redisConfig: RedisConfig | undefined;
   private _jobExpiration: number;
   private _scopes: string[];
@@ -100,6 +102,7 @@ class Fast42 {
     this._keyCount = secrets.length
     this._currentIndex = 0
     this._concurrentOffset = settings.concurrentOffset ?? 0
+    this._pendingTokens = new Map()
     this._redisConfig = settings.redisConfig
     this._jobExpiration = settings.jobExpiration ?? 60000
     this._scopes = settings.scopes ?? ['public', 'projects']
@@ -244,17 +247,16 @@ class Fast42 {
       return Promise.reject(new Error(this.NOTINITIALIZED))
     }
     const limit = await this.getRateLimits(accessToken)
-    const limiter = this._limiterPairs.find((limiterPair) => limiterPair.appId === limit.id)
-    if (limiter === undefined) {
+    const limiterPair = this._limiterPairs.find((limiterPair) => limiterPair.appId === limit.id)
+    if (limiterPair === undefined) {
       throw new Error("AppId not found, you need to initialize fast42 with the API keys used to get the user accessToken")
     }
-    const limiterWithUserToken = {
-      ...limiter,
-      tokenIndex: -42,
-    }
-    await this.storeToken({ access_token: accessToken, expires_in: 42 }, -42)
     const url = this._rootUrl + endpoint
-    const response = this.apiReqWithBody(Method.POST, limiterWithUserToken, url, body)
+    // The user's token is handed to the request directly instead of going through the token cache:
+    // it belongs to the caller, so it cannot be re-minted from our client credentials, and caching it
+    // under a shared key meant two concurrent calls could overwrite each other and send a request
+    // signed with the wrong user's token.
+    const response = this.apiReqWithBody(Method.POST, limiterPair, url, body, accessToken)
     return response
   }
 
@@ -290,34 +292,40 @@ class Fast42 {
           Authorization: `Bearer ${accessToken.access_token}`
         }
       })
-    })
+    }, () => this.invalidateToken(limiterPair.tokenIndex))
   }
 
-  private async apiReqWithBody(method: Method.PATCH | Method.POST | Method.PUT | Method.DELETE, limiterPair: LimiterPair, url: string, body: any): Promise<Response> {
+  /**
+   * When `accessToken` is given it is used verbatim instead of this client's cached token (see
+   * postWithUserAccessToken), and a 401 is not retried: the token belongs to the caller and cannot
+   * be re-minted from our client credentials.
+   */
+  private async apiReqWithBody(method: Method.PATCH | Method.POST | Method.PUT | Method.DELETE, limiterPair: LimiterPair, url: string, body: any, accessToken?: AccessToken): Promise<Response> {
     // Writes may not be idempotent, so we only retry rate-limit (429) responses (which are
     // rejected before processing and therefore safe to retry), not 5xx server errors.
     return this.scheduleWithRetry(limiterPair, false, async () => {
-      const accessToken = await this.retrieveToken(limiterPair.tokenIndex)
+      const token = accessToken ?? (await this.retrieveToken(limiterPair.tokenIndex)).access_token
       return fetch(url, {
         method: method,
         headers: {
-          'Authorization': `Bearer ${accessToken.access_token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
       })
-    })
+    }, accessToken === undefined ? () => this.invalidateToken(limiterPair.tokenIndex) : undefined)
   }
 
   /**
-   * Schedules a request on the given limiter and transparently retries it on rate-limit (429)
-   * and, optionally, server-error (5xx) responses. Each (re)try goes through the limiter again,
-   * so the rate limiter keeps accounting for retried requests. The retry policy itself lives in
+   * Schedules a request on the given limiter and transparently retries it on rate-limit (429),
+   * unauthorized (401) and, optionally, server-error (5xx) responses. Each (re)try goes through the
+   * limiter again, so the rate limiter keeps accounting for retried requests, and re-reads the token,
+   * so a retry after `onUnauthorized` picks up a freshly minted one. The retry policy itself lives in
    * the shared runWithRetry helper.
    */
-  private async scheduleWithRetry(limiterPair: LimiterPair, retryServerErrors: boolean, job: () => Promise<Response>): Promise<Response> {
+  private async scheduleWithRetry(limiterPair: LimiterPair, retryServerErrors: boolean, job: () => Promise<Response>, onUnauthorized?: () => void): Promise<Response> {
     return runWithRetry(this._retry, retryServerErrors, () =>
-      limiterPair.limiter.schedule(limiterPair.jobOptions, job))
+      limiterPair.limiter.schedule(limiterPair.jobOptions, job), onUnauthorized)
   }
 
   private async getAccessToken(clientid: string, clientsecret: string): Promise<AccessTokenInfo> {
@@ -335,8 +343,32 @@ class Fast42 {
     return accessToken
   }
 
-  private storeToken(accessToken: { access_token: AccessToken, expires_in: number }, index: number): void {
-    this._cache.set(`accessToken-${index}`, accessToken, accessToken.expires_in - 20) // refetch the token 20 seconds before expiration
+  private storeToken(accessToken: AccessTokenInfo, index: number): void {
+    this._cache.set(`accessToken-${index}`, accessToken, this.tokenTtl(accessToken))
+  }
+
+  /**
+   * Seconds a token may stay cached.
+   *
+   * 42 issues a single token per application and keeps returning that same token for every
+   * client_credentials grant until it actually expires, with `expires_in` counting down: asking again
+   * 100 seconds later returns the identical token string with `expires_in` 100 lower. `expires_in` is
+   * therefore the remaining lifetime as of this response, and `created_at` (the original creation
+   * time, which stays fixed across grants) must not be subtracted from it again.
+   *
+   * The result is clamped to at least one second, which is what keeps a nearly-dead token from being
+   * cached forever: `expires_in - 20` lands on exactly 0 for a token with 20 seconds left, and
+   * node-cache reads a TTL of 0 as "never expires". Because re-authenticating early just returns the
+   * same token, the final seconds of a token's life cannot be avoided by refreshing sooner; they are
+   * covered by the 401 retry instead.
+   */
+  private tokenTtl(accessToken: AccessTokenInfo): number {
+    return Math.max(1, accessToken.expires_in - TOKEN_EXPIRY_BUFFER_S)
+  }
+
+  /** Drops the cached token for a key, so the next request authenticates again. */
+  private invalidateToken(index: number): void {
+    this._cache.del(`accessToken-${index}`)
   }
 
   private async retrieveToken(index: number): Promise<AccessTokenInfo> {
@@ -344,12 +376,33 @@ class Fast42 {
     if (accessToken) {
       return accessToken
     }
-    if (this._secrets[index]) {
-      const newToken = await this.getAccessToken(this._secrets[index]!.client_id, this._secrets[index]!.client_secret)
-      this.storeToken(newToken, index)
-      return newToken
+    return this.refreshToken(index)
+  }
+
+  /**
+   * Mints a new token for a key. Every queued request calls retrieveToken independently, so without
+   * de-duplication a single expiry would fire one client_credentials grant per in-flight request
+   * (maxConcurrent of them at once). Concurrent callers share one token request instead.
+   */
+  private async refreshToken(index: number): Promise<AccessTokenInfo> {
+    const pending = this._pendingTokens.get(index)
+    if (pending) {
+      return pending
     }
-    return Promise.reject(`ApiSecret not found at index: ${index}`)
+    const secret = this._secrets[index]
+    if (!secret) {
+      return Promise.reject(new Error(`ApiSecret not found at index: ${index}`))
+    }
+    const request = this.getAccessToken(secret.client_id, secret.client_secret)
+      .then((newToken) => {
+        this.storeToken(newToken, index)
+        return newToken
+      })
+      .finally(() => {
+        this._pendingTokens.delete(index)
+      })
+    this._pendingTokens.set(index, request)
+    return request
   }
 
   private getCurrentIndexAndSetNext(): number {

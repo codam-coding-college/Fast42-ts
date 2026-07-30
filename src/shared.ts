@@ -2,6 +2,9 @@
  * Shared types and helpers used by both the v2 (Fast42) and v3 (Fast42v3) clients.
  */
 
+/** Refetch/refresh a token this many seconds before it actually expires. */
+export const TOKEN_EXPIRY_BUFFER_S = 20
+
 export enum Method {
   GET = 'GET',
   POST = 'POST',
@@ -68,11 +71,35 @@ export function parseOptions(options: { [key: string]: string } | undefined): st
  * When retry.enabled is true, 429 responses are retried indefinitely, waiting for the duration of the Retry-After header
  * (falling back to retryAfterFallback seconds when absent). 5xx responses are retried up to maxServerErrorRetries times
  * when retryServerErrors is true. After exhausting the 5xx retries, the last response is returned so the caller can inspect it.
+ *
+ * A 401 is retried exactly once, after invoking `onUnauthorized` (which is expected to drop the cached
+ * access token so the next attempt authenticates again). A token can be invalidated server-side before
+ * our cached copy expires, and without this the stale token would keep being sent until its TTL lapses.
+ * The single retry is deliberate: a genuinely revoked or unauthorized key still surfaces its 401 to the
+ * caller instead of looping.
  */
-export async function runWithRetry(retry: Required<RetryConfig>, retryServerErrors: boolean, job: () => Promise<Response>): Promise<Response> {
+export async function runWithRetry(
+  retry: Required<RetryConfig>,
+  retryServerErrors: boolean,
+  job: () => Promise<Response>,
+  onUnauthorized?: () => Promise<void> | void,
+): Promise<Response> {
   let serverErrorRetries = 0
+  let reauthenticated = false
   while (true) {
     const response: Response = await job()
+
+    if (retry.enabled && response.status === 401 && onUnauthorized && !reauthenticated) {
+      reauthenticated = true
+      try {
+        await onUnauthorized()
+        continue
+      } catch {
+        // Re-authentication itself failed (dead key, token endpoint down, ...). Return the original
+        // 401 rather than throwing, so callers' .ok/.status checks keep working as before.
+        return response
+      }
+    }
 
     if (retry.enabled && response.status === 429) {
       const retryAfterHeader = parseInt(response.headers.get('retry-after') ?? '')

@@ -174,6 +174,7 @@ The rate limiter does its best to stay under your key's limits, but the 42 API c
 
 - **429 (rate limit):** retried indefinitely, waiting for the duration of the `Retry-After` header (or `retryAfterFallback` seconds when it is absent). Applies to every request, including writes — a 429 is rejected before processing, so it is always safe to retry.
 - **5xx (server error):** retried up to `maxServerErrorRetries` times (default 5), waiting `serverErrorBackoff` ms between attempts. Only `GET` requests are retried on 5xx, since writes (`post`/`put`/`patch`/`delete`) may not be idempotent. After the retries are exhausted the last `Response` is returned, so existing `.ok`/`.status` checks keep working.
+- **401 (unauthorized):** the cached access token is dropped and the request is retried **once** after re-authenticating. This covers the tail end of a token's life, which cannot be avoided by refreshing earlier (see [tokens](#tokens)). The retry is deliberately capped at one, so a genuinely revoked or unauthorized key still returns its 401 to you instead of looping.
 
 Every retry goes back through the rate limiter, and a random `jitter` (up to 10s by default) is added to each wait to spread retries out. Retries can be tuned or disabled via the `retry` setting:
 
@@ -266,6 +267,17 @@ async function main() {
   await getAll42Cursus(api);
 }
 ```
+
+### Tokens
+
+Worth knowing, because it is not what the OAuth spec would lead you to expect: **42 issues one access token per application and returns that same token for every `client_credentials` grant until it genuinely expires.** `expires_in` counts down as the token ages (ask again 100 seconds later and you get the identical token string with `expires_in` 100 lower), while `created_at` stays fixed at the original creation time.
+
+Two consequences:
+
+- `expires_in` is the **remaining** lifetime as of that response, not a lifetime measured from `created_at`. Subtracting the token's age from it double-counts.
+- **You cannot refresh early.** Re-authenticating before expiry just hands back the same token, so a token's final seconds are unavoidable. That is what the automatic 401 retry is for: when the token does lapse, the next request drops it, re-authenticates, and retries once.
+
+Because the token is app-wide, there is no per-app token cap and no eviction — extra grants do not invalidate anyone else's token, so running many instances on one key is safe from an auth standpoint. Redis shares bottleneck's **rate-limit counters** between instances; tokens are deliberately not shared, since each instance simply receives the same app-wide token anyway. Within an instance, concurrent requests that all find an expired token share a single token request rather than each firing their own.
 
 Usage with redis:
 ```ts

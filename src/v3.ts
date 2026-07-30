@@ -1,4 +1,4 @@
-import { Method, RetryConfig, parseOptions, resolveRetry, runWithRetry } from './shared.js';
+import { Method, RetryConfig, TOKEN_EXPIRY_BUFFER_S, parseOptions, resolveRetry, runWithRetry } from './shared.js';
 
 /**
  * The Intra v3 API is not a single versioned host like v2. It is a collection of independent
@@ -19,9 +19,6 @@ import { Method, RetryConfig, parseOptions, resolveRetry, runWithRetry } from '.
 
 /** Default OIDC token endpoint (staff-42 Keycloak realm). */
 const DEFAULT_TOKEN_URL = 'https://auth.42.fr/auth/realms/staff-42/protocol/openid-connect/token'
-
-/** Refetch/refresh a token this many seconds before it actually expires. */
-const TOKEN_EXPIRY_BUFFER_S = 20
 
 export interface Fast42v3Config {
   /** OIDC client id (OIDC_RP_CLIENT_ID). */
@@ -221,7 +218,18 @@ class Fast42v3 {
         init.body = JSON.stringify(body)
       }
       return fetch(url, init)
-    })
+    }, () => this.invalidateAccessToken())
+  }
+
+  /**
+   * Marks the cached access token as expired so the next attempt re-authenticates (via the refresh
+   * token when it is still valid). Used to recover from a token that was invalidated provider-side
+   * before our copy expired.
+   */
+  private invalidateAccessToken(): void {
+    if (this._tokens) {
+      this._tokens.accessExpiresAt = 0
+    }
   }
 
   /** Returns a valid access token, refreshing or re-authenticating as needed. */

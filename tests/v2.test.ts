@@ -189,6 +189,168 @@ describe("scheduleWithRetry", () => {
         expect(result.status).toBe(404);
         expect(job).toHaveBeenCalledTimes(1);
     });
+
+    it("re-authenticates once on a 401 and retries the request", async () => {
+        const responses = [res(401), res(200)];
+        const job = jest.fn(async () => responses.shift());
+        const pair = fakeLimiterPair(job);
+        const onUnauthorized = jest.fn();
+
+        const result = await (newApi() as any).scheduleWithRetry(pair, true, job, onUnauthorized);
+
+        expect(result.status).toBe(200);
+        expect(onUnauthorized).toHaveBeenCalledTimes(1);
+        expect(job).toHaveBeenCalledTimes(2);
+    });
+
+    it("gives up after one re-auth so a revoked key still surfaces its 401", async () => {
+        const job = jest.fn(async () => res(401));
+        const pair = fakeLimiterPair(job);
+        const onUnauthorized = jest.fn();
+
+        const result = await (newApi() as any).scheduleWithRetry(pair, true, job, onUnauthorized);
+
+        expect(result.status).toBe(401);
+        expect(onUnauthorized).toHaveBeenCalledTimes(1);
+        expect(job).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns the 401 when re-authentication itself fails", async () => {
+        const job = jest.fn(async () => res(401));
+        const pair = fakeLimiterPair(job);
+        const onUnauthorized = jest.fn(async () => { throw new Error("token endpoint down") });
+
+        const result = await (newApi() as any).scheduleWithRetry(pair, true, job, onUnauthorized);
+
+        expect(result.status).toBe(401);
+        expect(job).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not re-authenticate on a 401 without an onUnauthorized handler", async () => {
+        const job = jest.fn(async () => res(401));
+        const pair = fakeLimiterPair(job);
+
+        const result = await (newApi() as any).scheduleWithRetry(pair, true, job);
+
+        expect(result.status).toBe(401);
+        expect(job).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not re-authenticate on a 401 when retries are disabled", async () => {
+        const job = jest.fn(async () => res(401));
+        const pair = fakeLimiterPair(job);
+        const onUnauthorized = jest.fn();
+
+        const result = await (newApi({ enabled: false }) as any).scheduleWithRetry(pair, true, job, onUnauthorized);
+
+        expect(result.status).toBe(401);
+        expect(onUnauthorized).not.toHaveBeenCalled();
+        expect(job).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("token caching", () => {
+    const nowS = () => Math.floor(Date.now() / 1000);
+    const token = (overrides: any = {}) => ({
+        access_token: 'tok',
+        token_type: 'bearer',
+        expires_in: 7200,
+        scope: 'public projects',
+        created_at: nowS(),
+        ...overrides,
+    });
+    const newApi = () => new Fast42([{ client_id, client_secret }]);
+
+    it("caches a fresh token for expires_in minus the safety buffer", () => {
+        expect((newApi() as any).tokenTtl(token())).toBe(7180);
+    });
+
+    it("treats expires_in as the remaining lifetime, not a lifetime from created_at", () => {
+        // 42 returns the same app-wide token for every grant, counting expires_in down as it ages.
+        // The elapsed time is already baked into expires_in and must not be subtracted twice.
+        expect((newApi() as any).tokenTtl(token({ expires_in: 200, created_at: nowS() - 7000 }))).toBe(180);
+    });
+
+    it("never returns a TTL of 0, which node-cache would read as 'never expires'", () => {
+        // Regression: expires_in - 20 lands on exactly 0 for a token with 20 seconds left, which
+        // pinned a nearly-dead token in the cache forever and made every later request 401.
+        expect((newApi() as any).tokenTtl(token({ expires_in: 20 }))).toBe(1);
+        expect((newApi() as any).tokenTtl(token({ expires_in: 5 }))).toBe(1);
+        expect((newApi() as any).tokenTtl(token({ expires_in: 0 }))).toBe(1);
+    });
+
+    it("stores a nearly-expired token with a finite TTL", () => {
+        const api = newApi();
+        (api as any).storeToken(token({ expires_in: 20 }), 0);
+        // node-cache getTtl returns 0 for a key that never expires, and a timestamp otherwise.
+        expect((api as any)._cache.getTtl('accessToken-0')).toBeGreaterThan(0);
+    });
+
+    it("de-duplicates concurrent token refreshes for the same key", async () => {
+        mockedFetch.mockResolvedValue({ ok: true, json: async () => token() } as any);
+        const api = newApi();
+
+        const tokens = await Promise.all(
+            Array.from({ length: 5 }, () => (api as any).retrieveToken(0)));
+
+        expect(mockedFetch).toHaveBeenCalledTimes(1);
+        tokens.forEach((t: any) => expect(t.access_token).toBe('tok'));
+        // A later call is served from the cache, and the in-flight entry is cleaned up.
+        await (api as any).retrieveToken(0);
+        expect(mockedFetch).toHaveBeenCalledTimes(1);
+        expect((api as any)._pendingTokens.size).toBe(0);
+    });
+
+    it("clears the in-flight entry when the token request fails", async () => {
+        mockedFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' } as any);
+        const api = newApi();
+
+        await expect((api as any).retrieveToken(0)).rejects.toThrow(/Error getting access token: 401/);
+        expect((api as any)._pendingTokens.size).toBe(0);
+    });
+
+    it("rejects with an Error when no secret exists at the index", async () => {
+        await expect((newApi() as any).retrieveToken(9)).rejects.toThrow(/ApiSecret not found at index: 9/);
+    });
+
+    it("re-mints the token after invalidateToken drops it", async () => {
+        mockedFetch.mockResolvedValue({ ok: true, json: async () => token() } as any);
+        const api = newApi();
+
+        await (api as any).retrieveToken(0);
+        (api as any).invalidateToken(0);
+        await (api as any).retrieveToken(0);
+
+        expect(mockedFetch).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("postWithUserAccessToken", () => {
+    it("uses the caller's token verbatim and keeps it out of the token cache", async () => {
+        const api = new Fast42([{ client_id, client_secret }]);
+        (api as any)._limiterPairs = [{
+            appId: 7,
+            limiter: { schedule: (_opts: any, fn: () => Promise<any>) => fn() },
+            secret: { client_id, client_secret },
+            tokenIndex: 0,
+            jobOptions: {},
+        }];
+        mockedFetch
+            // getRateLimits, used to find the limiter belonging to this app
+            .mockResolvedValueOnce({ ok: true, headers: { get: (h: string) => (h === 'x-application-id' ? '7' : '10') } } as any)
+            // the actual POST
+            .mockResolvedValueOnce({ status: 201, ok: true, headers: { get: () => null } } as any);
+
+        const result = await api.postWithUserAccessToken('user-token', '/me', { a: 1 });
+
+        expect(result.status).toBe(201);
+        expect(mockedFetch).toHaveBeenLastCalledWith(
+            "https://api.intra.42.fr/v2/me",
+            expect.objectContaining({
+                headers: expect.objectContaining({ 'Authorization': 'Bearer user-token' }),
+            }));
+        expect((api as any)._cache.keys()).toEqual([]);
+    });
 });
 
 it("Should default retry settings to enabled with bounded 5xx retries", () => {
