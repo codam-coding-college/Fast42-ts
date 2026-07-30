@@ -1,6 +1,6 @@
 {
   "name": "@codam/fast42",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Fast (server-side) connector with rate-limiter for 42 API.",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",

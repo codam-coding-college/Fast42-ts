@@ -1,3 +1,10 @@
+## [3.1.1](https://github.com/codam-coding-college/Fast42-ts/compare/v3.1.0...v3.1.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* fix permanent 401 errors when making an API request within the last few seconds of an API token's lifetime ([40ea88d](https://github.com/codam-coding-college/Fast42-ts/commit/40ea88d69464c8c678b85c527353db8629835c73))
+
 # [3.1.0](https://github.com/codam-coding-college/Fast42-ts/compare/v3.0.0...v3.1.0) (2026-07-13)
 
 
