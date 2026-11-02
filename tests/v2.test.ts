@@ -353,6 +353,132 @@ describe("postWithUserAccessToken", () => {
     });
 });
 
+describe("download", () => {
+    const token = {
+        access_token: 'cdn-tok',
+        token_type: 'bearer',
+        expires_in: 7200,
+        scope: 'public projects',
+        created_at: Math.floor(Date.now() / 1000),
+    };
+    const schedule = jest.fn((_opts: any, fn: () => Promise<any>) => fn());
+    const newApi = () => {
+        const api = new Fast42([{ client_id, client_secret }], { retry: { jitter: 0, serverErrorBackoff: 0, retryAfterFallback: 0 } });
+        (api as any)._limiterPairs = [{
+            appId: 1,
+            limiter: { schedule },
+            secret: { client_id, client_secret },
+            tokenIndex: 0,
+            jobOptions: {},
+        }];
+        (api as any).storeToken(token, 0);
+        return api;
+    };
+    const fileResponse = (status = 200) => ({ status, ok: status >= 200 && status < 300, headers: { get: () => null } });
+
+    beforeEach(() => schedule.mockClear());
+
+    it("fetches an absolute CDN URL with the API access token as bearer", async () => {
+        mockedFetch.mockResolvedValueOnce(fileResponse() as any);
+
+        const result = await newApi().download("https://cdn.intra.42.fr/users/abc.jpg");
+
+        expect(result.status).toBe(200);
+        expect(mockedFetch).toHaveBeenCalledTimes(1);
+        expect(mockedFetch).toHaveBeenCalledWith(
+            "https://cdn.intra.42.fr/users/abc.jpg",
+            expect.objectContaining({
+                method: 'GET',
+                headers: expect.objectContaining({ Authorization: 'Bearer cdn-tok' }),
+            }));
+    });
+
+    it("resolves a CDN-relative path against the CDN root", async () => {
+        mockedFetch.mockResolvedValueOnce(fileResponse() as any);
+
+        await newApi().download("/users/abc.jpg");
+
+        expect(mockedFetch).toHaveBeenCalledWith(
+            "https://cdn.intra.42.fr/users/abc.jpg",
+            expect.anything());
+    });
+
+    it("refuses to send the access token to any other origin", async () => {
+        const api = newApi();
+
+        await expect(api.download("https://evil.example.com/users/abc.jpg")).rejects.toThrow(/only fetches from https:\/\/cdn.intra.42.fr/);
+        // Plain http would send the bearer token in the clear.
+        await expect(api.download("http://cdn.intra.42.fr/users/abc.jpg")).rejects.toThrow(/only fetches from https:\/\/cdn.intra.42.fr/);
+        // A host that merely starts with the CDN host name is not the CDN either.
+        await expect(api.download("https://cdn.intra.42.fr.example.com/x.jpg")).rejects.toThrow(/only fetches from https:\/\/cdn.intra.42.fr/);
+        expect(mockedFetch).not.toHaveBeenCalled();
+    });
+
+    it("does not go through the API rate limiter", async () => {
+        mockedFetch.mockResolvedValueOnce(fileResponse() as any);
+
+        await newApi().download("/users/abc.jpg");
+
+        expect(schedule).not.toHaveBeenCalled();
+    });
+
+    it("re-authenticates once on a 401 and retries with the new token", async () => {
+        mockedFetch
+            .mockResolvedValueOnce(fileResponse(401) as any)
+            // token refresh
+            .mockResolvedValueOnce({ ok: true, json: async () => ({ ...token, access_token: 'fresh-tok' }) } as any)
+            .mockResolvedValueOnce(fileResponse() as any);
+
+        const result = await newApi().download("/users/abc.jpg");
+
+        expect(result.status).toBe(200);
+        expect(mockedFetch).toHaveBeenCalledTimes(3);
+        expect(mockedFetch).toHaveBeenLastCalledWith(
+            "https://cdn.intra.42.fr/users/abc.jpg",
+            expect.objectContaining({
+                headers: expect.objectContaining({ Authorization: 'Bearer fresh-tok' }),
+            }));
+    });
+
+    it("treats the CDN's 403 bearer challenge like a 401 and re-authenticates once", async () => {
+        // Observed on cdn.intra.42.fr: a bad token yields 403 (not 401) with a WWW-Authenticate challenge.
+        const challenge = 'Bearer realm="42 API", error="invalid_token", error_description="The access token expired"';
+        const forbidden = { status: 403, ok: false, headers: { get: (h: string) => (h.toLowerCase() === 'www-authenticate' ? challenge : null) } };
+        mockedFetch
+            .mockResolvedValueOnce(forbidden as any)
+            // token refresh
+            .mockResolvedValueOnce({ ok: true, json: async () => ({ ...token, access_token: 'fresh-tok' }) } as any)
+            .mockResolvedValueOnce(fileResponse() as any);
+
+        const result = await newApi().download("/users/abc.jpg");
+
+        expect(result.status).toBe(200);
+        expect(mockedFetch).toHaveBeenCalledTimes(3);
+        expect(mockedFetch).toHaveBeenLastCalledWith(
+            "https://cdn.intra.42.fr/users/abc.jpg",
+            expect.objectContaining({
+                headers: expect.objectContaining({ Authorization: 'Bearer fresh-tok' }),
+            }));
+    });
+
+    it("does not re-authenticate on a plain 403 without a bearer challenge", async () => {
+        mockedFetch.mockResolvedValueOnce(fileResponse(403) as any);
+
+        const result = await newApi().download("/users/abc.jpg");
+
+        expect(result.status).toBe(403);
+        expect(mockedFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects when Fast42 is not initialized", async () => {
+        const api = new Fast42([{ client_id, client_secret }]);
+        jest.spyOn(console, 'error').mockImplementationOnce(() => {});
+
+        await expect(api.download("/users/abc.jpg")).rejects.toThrow(/not initialized/);
+        expect(mockedFetch).not.toHaveBeenCalled();
+    });
+});
+
 it("Should default retry settings to enabled with bounded 5xx retries", () => {
     const api = new Fast42([
         {

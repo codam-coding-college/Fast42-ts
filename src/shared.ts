@@ -62,6 +62,25 @@ export function parseOptions(options: { [key: string]: string } | undefined): st
   return optionsString
 }
 
+/** The default notion of "this request was rejected because of its token": a plain 401. */
+export function isUnauthorized(response: Response): boolean {
+  return response.status === 401
+}
+
+/**
+ * Like isUnauthorized, but also recognises the Intra CDN's way of rejecting a bad or expired token:
+ * cdn.intra.42.fr answers with 403 Forbidden and a `WWW-Authenticate: Bearer realm="42 API", error=...`
+ * challenge instead of a 401. A 403 without that bearer challenge (e.g. a file the token's app may
+ * not access) is left alone.
+ */
+export function isUnauthorizedOrBearerChallenge(response: Response): boolean {
+  if (isUnauthorized(response)) {
+    return true
+  }
+  const challenge = response.headers.get('www-authenticate') ?? ''
+  return response.status === 403 && /^Bearer\b/i.test(challenge) && /\berror=/i.test(challenge)
+}
+
 /**
  * Runs `job` and transparently retries it on rate-limit (429) and, optionally, server-error (5xx)
  * responses. The retry policy is identical for both API versions; what differs is the `job` each
@@ -76,20 +95,22 @@ export function parseOptions(options: { [key: string]: string } | undefined): st
  * access token so the next attempt authenticates again). A token can be invalidated server-side before
  * our cached copy expires, and without this the stale token would keep being sent until its TTL lapses.
  * The single retry is deliberate: a genuinely revoked or unauthorized key still surfaces its 401 to the
- * caller instead of looping.
+ * caller instead of looping. What counts as "unauthorized" is decided by `unauthorized` (a plain 401 by
+ * default; the CDN needs isUnauthorizedOrBearerChallenge).
  */
 export async function runWithRetry(
   retry: Required<RetryConfig>,
   retryServerErrors: boolean,
   job: () => Promise<Response>,
   onUnauthorized?: () => Promise<void> | void,
+  unauthorized: (response: Response) => boolean = isUnauthorized,
 ): Promise<Response> {
   let serverErrorRetries = 0
   let reauthenticated = false
   while (true) {
     const response: Response = await job()
 
-    if (retry.enabled && response.status === 401 && onUnauthorized && !reauthenticated) {
+    if (retry.enabled && onUnauthorized && !reauthenticated && unauthorized(response)) {
       reauthenticated = true
       try {
         await onUnauthorized()

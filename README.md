@@ -66,6 +66,9 @@ put(endpoint: string, body: any): Promise<Response>
 // use a user's accesstoken to make the request, you still need to initialize Fast42 with the same api key used to authenticate the user
 postWithUserAccessToken(accessToken: AccessToken, endpoint: string, body: any): Promise<Response>
 
+// download a file from the Intra CDN (cdn.intra.42.fr), which requires the API access token. See below.
+download(url: string): Promise<Response>
+
 // used for testing, just runs a random job on the current limiter
 doJob(job: any): Promise<unknown>;
 
@@ -97,6 +100,25 @@ const pages = await api.getAllPages(`/campus/${campus_id}/users`, {
 ```
 
 Obviously your id/secret should come from the environment and not be committed to git. (I recommend using a `.env` file and the `dotenv` package)
+
+### Downloading CDN content
+
+Files hosted on the Intra CDN (`cdn.intra.42.fr`), such as profile pictures and project attachments, require a valid Intra API v2 access token in the `Authorization: Bearer <access_token>` header. `download()` takes care of that for you, using the same tokens (and 401/429/5xx retries) as the regular API calls:
+
+```ts
+const res = await api.get('/users/fbes')
+const user = await res.json()
+
+// `url` can be the absolute CDN URL the API hands you, or a path relative to the CDN root.
+const picture = await api.download(user.image.link) // e.g. https://cdn.intra.42.fr/users/abc123/fbes.jpg
+if (picture.ok) {
+  await fs.promises.writeFile('fbes.jpg', Buffer.from(await picture.arrayBuffer()))
+}
+```
+
+`download()` returns the raw `Response`, so you can stream the body, read it as an `ArrayBuffer`/`Blob`, or forward it as-is. URLs on any origin other than `https://cdn.intra.42.fr` are rejected, so your access token can never end up at a third party. CDN downloads do not count against your API key's rate limit and therefore bypass the rate limiter.
+
+Note that the CDN rejects a missing, invalid or expired token with `403 Forbidden` (plus a `WWW-Authenticate: Bearer` challenge) rather than `401`. Fast42 recognises that challenge and re-authenticates once, exactly as it does for a `401` from the API, so a `403` you do get back means the token is genuinely not allowed to fetch that file.
 
 ### Intra v3 API (`Fast42v3`)
 

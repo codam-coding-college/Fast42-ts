@@ -1,7 +1,7 @@
 import Bottleneck from "@sergiiivzhenko/bottleneck";
 import NodeCache from 'node-cache';
 import redis from 'redis';
-import { Method, RetryConfig, TOKEN_EXPIRY_BUFFER_S, parseOptions, resolveRetry, runWithRetry } from './shared.js';
+import { Method, RetryConfig, TOKEN_EXPIRY_BUFFER_S, isUnauthorizedOrBearerChallenge, parseOptions, resolveRetry, runWithRetry } from './shared.js';
 
 interface AccessTokenInfo {
   access_token: AccessToken
@@ -53,6 +53,7 @@ class Fast42 {
   private _secrets: ApiSecret[]
   private _limiterPairs: LimiterPair[]
   private _rootUrl: string
+  private _cdnRootUrl: string
   private _cache: NodeCache
   private _keyCount: number
   private _currentIndex: number
@@ -97,6 +98,7 @@ class Fast42 {
       }
     this._secrets = secrets
     this._rootUrl = "https://api.intra.42.fr/v2"
+    this._cdnRootUrl = "https://cdn.intra.42.fr"
     this._cache = new NodeCache()
     this._limiterPairs = []
     this._keyCount = secrets.length
@@ -260,6 +262,42 @@ class Fast42 {
     return response
   }
 
+  /**
+   * Downloads a file from the Intra CDN (cdn.intra.42.fr), e.g. a user's profile picture or a
+   * project attachment. The CDN requires a valid Intra API v2 access token, so this sends the same
+   * `Authorization: Bearer <access_token>` header as the API requests do.
+   *
+   * @param url Either an absolute CDN URL as returned by the API (e.g. `https://cdn.intra.42.fr/users/abc.jpg`,
+   *  the `image.link` of a user) or a path relative to the CDN root (e.g. `/users/abc.jpg`).
+   *  Any other origin is rejected, so the access token is never sent to a third party.
+   * @returns The raw Response, so the body can be consumed as a stream, ArrayBuffer, Blob, etc.
+   *
+   * CDN downloads do not go through the API rate limiter: the CDN is a separate service and its
+   * requests are not counted against the API key's hourly/secondly limits (verified: a burst of CDN
+   * downloads leaves x-hourly-ratelimit-remaining untouched), so routing them through Bottleneck would
+   * needlessly eat into (and slow down) the API quota. Rate-limit (429) and server error (5xx)
+   * responses are still retried like any GET request. Note that the CDN rejects a bad or expired
+   * token with a 403 + `WWW-Authenticate: Bearer` challenge rather than a 401; both trigger the
+   * usual single re-authentication.
+   */
+  async download(url: string): Promise<Response> {
+    if (!this.isInitialized()) {
+      return Promise.reject(new Error(this.NOTINITIALIZED))
+    }
+    const cdnUrl = this.resolveCdnUrl(url)
+    const index = this.getCurrentIndexAndSetNext()
+    const tokenIndex = this._limiterPairs[index]!.tokenIndex
+    return runWithRetry(this._retry, true, async () => {
+      const accessToken = await this.retrieveToken(tokenIndex)
+      return fetch(cdnUrl, {
+        method: Method.GET,
+        headers: {
+          Authorization: `Bearer ${accessToken.access_token}`
+        }
+      })
+    }, () => this.invalidateToken(tokenIndex), isUnauthorizedOrBearerChallenge)
+  }
+
   public async doJob(job: any): Promise<unknown> {
     if (!this.isInitialized()) {
       return Promise.reject(new Error(this.NOTINITIALIZED))
@@ -326,6 +364,19 @@ class Fast42 {
   private async scheduleWithRetry(limiterPair: LimiterPair, retryServerErrors: boolean, job: () => Promise<Response>, onUnauthorized?: () => void): Promise<Response> {
     return runWithRetry(this._retry, retryServerErrors, () =>
       limiterPair.limiter.schedule(limiterPair.jobOptions, job), onUnauthorized)
+  }
+
+  /**
+   * Turns a CDN path or absolute CDN URL into an absolute URL on the CDN root, and throws for any
+   * other origin (including plain-http cdn.intra.42.fr) so that the bearer token is only ever sent
+   * to the Intra CDN itself.
+   */
+  private resolveCdnUrl(urlOrPath: string): string {
+    const url = new URL(urlOrPath, this._cdnRootUrl)
+    if (url.origin !== this._cdnRootUrl) {
+      throw new Error(`download() only fetches from ${this._cdnRootUrl}, refusing to send the access token to ${url.origin}`)
+    }
+    return url.toString()
   }
 
   private async getAccessToken(clientid: string, clientsecret: string): Promise<AccessTokenInfo> {
