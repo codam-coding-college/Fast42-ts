@@ -223,3 +223,35 @@ it("Should reject requests before init()", async () => {
     const api = new Fast42v3(config);
     await expect(api.get('pace-system', 'v1', '/milestones')).rejects.toThrow(/not initialized/);
 });
+
+describe("re-authentication on 401", () => {
+    it("refreshes the token and retries the request with it", async () => {
+        const api = await newInitializedClient();
+        mockedFetch
+            .mockResolvedValueOnce(jsonRes({}, 401))
+            .mockResolvedValueOnce(jsonRes({ ...tokenResponse, access_token: 'access-2' }))
+            .mockResolvedValueOnce(jsonRes({ ok: true }));
+
+        const result = await api.get('pace-system', 'v1', '/milestones');
+
+        expect(result.status).toBe(200);
+        expect(mockedFetch).toHaveBeenCalledTimes(3);
+        expect(mockedFetch).toHaveBeenLastCalledWith(
+            expect.stringContaining('pace-system.42.fr'),
+            expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer access-2' }) }));
+    });
+
+    it("returns the original 401 (does not reject) when re-authentication fails", async () => {
+        // Regression: the token used to be refreshed lazily inside the retried request, so a failed
+        // refresh made the request reject with the token error instead of returning the 401.
+        const api = await newInitializedClient();
+        mockedFetch
+            .mockResolvedValueOnce(jsonRes({}, 401))
+            .mockResolvedValueOnce(jsonRes({ error: 'invalid_grant' }, 400));
+
+        const result = await api.get('pace-system', 'v1', '/milestones');
+
+        expect(result.status).toBe(401);
+        expect(mockedFetch).toHaveBeenCalledTimes(2);
+    });
+});

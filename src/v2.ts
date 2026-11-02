@@ -295,7 +295,7 @@ class Fast42 {
           Authorization: `Bearer ${accessToken.access_token}`
         }
       })
-    }, () => this.invalidateToken(tokenIndex), isUnauthorizedOrBearerChallenge)
+    }, () => this.reauthenticate(tokenIndex), isUnauthorizedOrBearerChallenge)
   }
 
   public async doJob(job: any): Promise<unknown> {
@@ -330,7 +330,7 @@ class Fast42 {
           Authorization: `Bearer ${accessToken.access_token}`
         }
       })
-    }, () => this.invalidateToken(limiterPair.tokenIndex))
+    }, () => this.reauthenticate(limiterPair.tokenIndex))
   }
 
   /**
@@ -351,7 +351,7 @@ class Fast42 {
         },
         body: JSON.stringify(body),
       })
-    }, accessToken === undefined ? () => this.invalidateToken(limiterPair.tokenIndex) : undefined)
+    }, accessToken === undefined ? () => this.reauthenticate(limiterPair.tokenIndex) : undefined)
   }
 
   /**
@@ -420,6 +420,17 @@ class Fast42 {
   /** Drops the cached token for a key, so the next request authenticates again. */
   private invalidateToken(index: number): void {
     this._cache.del(`accessToken-${index}`)
+  }
+
+  /**
+   * Drops the cached token for a key and immediately mints a new one. Used as the `onUnauthorized`
+   * hook of runWithRetry: minting eagerly here (instead of lazily on the retried request) means a
+   * failed re-authentication is caught by runWithRetry, which then returns the original 401/403 to
+   * the caller instead of rejecting the whole request.
+   */
+  private async reauthenticate(index: number): Promise<void> {
+    this.invalidateToken(index)
+    await this.retrieveToken(index)
   }
 
   private async retrieveToken(index: number): Promise<AccessTokenInfo> {

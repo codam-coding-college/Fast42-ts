@@ -325,6 +325,66 @@ describe("token caching", () => {
     });
 });
 
+describe("re-authentication on 401", () => {
+    const token = (access_token: string) => ({
+        access_token, token_type: 'bearer', expires_in: 7200, scope: 'public projects',
+        created_at: Math.floor(Date.now() / 1000),
+    });
+    const res = (status: number) => ({ status, ok: status >= 200 && status < 300, headers: { get: () => null } });
+    const newApi = () => {
+        const api = new Fast42([{ client_id, client_secret }], { retry: { jitter: 0 } });
+        (api as any)._limiterPairs = [{
+            appId: 1,
+            limiter: { schedule: (_opts: any, fn: () => Promise<any>) => fn() },
+            secret: { client_id, client_secret },
+            tokenIndex: 0,
+            jobOptions: {},
+        }];
+        (api as any).storeToken(token('stale-tok'), 0);
+        return api;
+    };
+
+    it("mints a new token and retries the GET with it", async () => {
+        mockedFetch
+            .mockResolvedValueOnce(res(401) as any)
+            .mockResolvedValueOnce({ ok: true, json: async () => token('fresh-tok') } as any)
+            .mockResolvedValueOnce(res(200) as any);
+
+        const result = await newApi().get("/me");
+
+        expect(result.status).toBe(200);
+        expect(mockedFetch).toHaveBeenCalledTimes(3);
+        expect(mockedFetch).toHaveBeenLastCalledWith(
+            "https://api.intra.42.fr/v2/me",
+            expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer fresh-tok' }) }));
+    });
+
+    it("returns the original 401 (does not reject) when the token endpoint refuses the key", async () => {
+        // Regression: the token used to be re-minted lazily inside the retried request, so a dead
+        // key made get()/post() reject with "Error getting access token" instead of returning the 401.
+        mockedFetch
+            .mockResolvedValueOnce(res(401) as any)
+            .mockResolvedValueOnce({ ok: false, status: 401, statusText: 'Unauthorized' } as any);
+
+        const result = await newApi().get("/me");
+
+        expect(result.status).toBe(401);
+        expect(mockedFetch).toHaveBeenCalledTimes(2);
+        expect((newApi() as any)._pendingTokens.size).toBe(0);
+    });
+
+    it("returns the original 401 for writes too", async () => {
+        mockedFetch
+            .mockResolvedValueOnce(res(401) as any)
+            .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Internal Server Error' } as any);
+
+        const result = await newApi().post("/me", { a: 1 });
+
+        expect(result.status).toBe(401);
+        expect(mockedFetch).toHaveBeenCalledTimes(2);
+    });
+});
+
 describe("postWithUserAccessToken", () => {
     it("uses the caller's token verbatim and keeps it out of the token cache", async () => {
         const api = new Fast42([{ client_id, client_secret }]);
@@ -459,6 +519,20 @@ describe("download", () => {
             expect.objectContaining({
                 headers: expect.objectContaining({ Authorization: 'Bearer fresh-tok' }),
             }));
+    });
+
+    it("returns the original 403 when re-authentication fails, instead of rejecting", async () => {
+        const challenge = 'Bearer realm="42 API", error="invalid_token"';
+        const forbidden = { status: 403, ok: false, headers: { get: (h: string) => (h.toLowerCase() === 'www-authenticate' ? challenge : null) } };
+        mockedFetch
+            .mockResolvedValueOnce(forbidden as any)
+            // token refresh fails: dead key
+            .mockResolvedValueOnce({ ok: false, status: 401, statusText: 'Unauthorized' } as any);
+
+        const result = await newApi().download("/users/abc.jpg");
+
+        expect(result.status).toBe(403);
+        expect(mockedFetch).toHaveBeenCalledTimes(2);
     });
 
     it("does not re-authenticate on a plain 403 without a bearer challenge", async () => {

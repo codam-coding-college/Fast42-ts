@@ -91,11 +91,13 @@ export function isUnauthorizedOrBearerChallenge(response: Response): boolean {
  * (falling back to retryAfterFallback seconds when absent). 5xx responses are retried up to maxServerErrorRetries times
  * when retryServerErrors is true. After exhausting the 5xx retries, the last response is returned so the caller can inspect it.
  *
- * A 401 is retried exactly once, after invoking `onUnauthorized` (which is expected to drop the cached
- * access token so the next attempt authenticates again). A token can be invalidated server-side before
- * our cached copy expires, and without this the stale token would keep being sent until its TTL lapses.
- * The single retry is deliberate: a genuinely revoked or unauthorized key still surfaces its 401 to the
- * caller instead of looping. What counts as "unauthorized" is decided by `unauthorized` (a plain 401 by
+ * A 401 is retried exactly once, after awaiting `onUnauthorized`, which is expected to drop the cached
+ * access token AND obtain a new one right away. A token can be invalidated server-side before our
+ * cached copy expires, and without this the stale token would keep being sent until its TTL lapses.
+ * Because the new token is minted inside `onUnauthorized`, a failed re-authentication is caught here
+ * and the original 401 is returned (instead of the request rejecting with the token error). The single
+ * retry is deliberate: a genuinely revoked or unauthorized key still surfaces its 401 to the caller
+ * instead of looping. What counts as "unauthorized" is decided by `unauthorized` (a plain 401 by
  * default; the CDN needs isUnauthorizedOrBearerChallenge).
  */
 export async function runWithRetry(

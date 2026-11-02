@@ -218,7 +218,7 @@ class Fast42v3 {
         init.body = JSON.stringify(body)
       }
       return fetch(url, init)
-    }, () => this.invalidateAccessToken())
+    }, () => this.reauthenticateNow())
   }
 
   /**
@@ -230,6 +230,17 @@ class Fast42v3 {
     if (this._tokens) {
       this._tokens.accessExpiresAt = 0
     }
+  }
+
+  /**
+   * Invalidates the cached access token and immediately obtains a new one. Used as the
+   * `onUnauthorized` hook of runWithRetry: re-authenticating eagerly here means a failure (expired
+   * refresh token on a 2FA account, provider down, ...) is caught by runWithRetry, which then returns
+   * the original 401 to the caller instead of rejecting the whole request.
+   */
+  private async reauthenticateNow(): Promise<void> {
+    this.invalidateAccessToken()
+    await this.getValidToken()
   }
 
   /** Returns a valid access token, refreshing or re-authenticating as needed. */
