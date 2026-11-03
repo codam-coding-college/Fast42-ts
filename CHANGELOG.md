@@ -1,3 +1,15 @@
+# [3.2.0](https://github.com/codam-coding-college/Fast42-ts/compare/v3.1.1...v3.2.0) (2026-11-03)
+
+
+### Bug Fixes
+
+* return the original 401/403 instead of rejecting when re-authentication fails ([acadff0](https://github.com/codam-coding-college/Fast42-ts/commit/acadff0bf078ae3876c4fce33f9d7b513bb2ff80))
+
+
+### Features
+
+* add CDN downloading functionality ([15942c0](https://github.com/codam-coding-college/Fast42-ts/commit/15942c0fdb8549918e0ceca6d316551be95840fd))
+
 ## [3.1.1](https://github.com/codam-coding-college/Fast42-ts/compare/v3.1.0...v3.1.1) (2026-07-30)
 
 
